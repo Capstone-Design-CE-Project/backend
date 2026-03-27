@@ -45,38 +45,89 @@ class imagine:
             print(f"대상: {self.target}")
     
     def __repr__(self):
-        return f"<{self.noun}: {self.adjectives}>"
+        return f"<{self.noun}: {self.adjectives} {self.actions}>"
+def map_josa_to_kkma_tag(josa: str) -> str:
+	josa_tag_map = {
+		"이": "JKS",
+		"가": "JKS",
+		"은": "JX",
+		"는": "JX",
+		"을": "JKO",
+		"를": "JKO",
+		"에": "JKM",
+		"에서": "JKM",
+		"에게": "JKM",
+		"의": "JKG",
+		"와": "JC",
+		"과": "JC",
+		"랑": "JC",
+		"도": "JX",
+		"만": "JX",
+	}
+	return josa_tag_map.get(josa, "JX")
 
 
+def postprocess_kkma_pos(sentence: str):
+	raw = kkma.pos(sentence)
+	processed = []
+
+	for word, pos in raw:
+		if pos in {"NNG", "NNP"}:
+			# Kkma가 명사+조사를 하나의 명사로 붙여 분석한 경우를 Okt로 보정한다.
+			okt_tokens = okt.pos(word, norm=True, stem=True)
+			if (
+				len(okt_tokens) == 2
+				and okt_tokens[0][1] == "Noun"
+				and okt_tokens[1][1] == "Josa"
+			):
+				noun = okt_tokens[0][0]
+				josa = okt_tokens[1][0]
+				if noun + josa == word:
+					processed.append((noun, pos))
+					processed.append((josa, map_josa_to_kkma_tag(josa)))
+					continue
+
+		processed.append((word, pos))
+
+	return processed
 def extract_nouns_adjectives_verbs(sentence):
     """한 문장에서 명사, 형용사, 동사를 추출하여 imagine 객체로 반환
-    접속사로 연결된 명사들은 같은 동사를 공유합니다.
+    명사가 없으면 형용사와 동사의 리스트를 반환합니다.
     
     Args:
         sentence: 분석할 문장
     
     Returns:
-        명사 기준으로 organize된 imagine 객체 리스트
+        - 명사가 있으면: 명사 기준으로 organize된 imagine 객체 리스트
+        - 명사가 없으면: {'adjectives': [형용사들], 'verbs': [동사들]}
     """
     sentence = sentence.strip()
     
     # 형태소 분석
-    tokens = kkma.pos(sentence)
-    
+    tokens = postprocess_kkma_pos(sentence)
     # 명사별로 정보 저장
     noun_objects = []  # imagine 객체 리스트
     current_adjectives = []
     current_noun = None
     connected_nouns = []  # 현재 절에서 접속사로 연결된 명사들
     
+    # 명사가 없을 때를 위한 추적
+    all_adjectives = []
+    all_verbs = []
+    
     i = 0
     while i < len(tokens):
         word, pos = tokens[i]
         
         # 형용사 수집
-        if pos in ['VA', 'JJ'] or word.endswith("색"):
+        if pos in ['VA'] or word.endswith("색"):
             current_adjectives.append(word)
-        # 명사 처리
+            all_adjectives.append(word)  # 전체 형용사 추적
+            # 형용사를 수집하면 바로 이전 명사에 붙이기
+            if current_noun is not None:
+                current_noun.adjectives.extend(current_adjectives)
+                current_adjectives = []
+        # 명사 처리 (색 명사는 이미 형용사로 수집되었으므로, 별도로 명사 처리)
         elif pos.startswith('N') and word not in positions:
             # 다음 토큰이 목적격 조사(을/를)인지 확인
             if i + 1 < len(tokens):
@@ -104,7 +155,8 @@ def extract_nouns_adjectives_verbs(sentence):
             current_noun = new_noun
             current_adjectives = []
         # 동사 처리
-        elif pos.startswith('V'):
+        elif pos.startswith('VV'):
+            all_verbs.append(word)  # 전체 동사 추적
             # 현재 절의 모든 명사에 동사 추가 (접속사로 연결된 명사들 포함)
             for noun_obj in connected_nouns:
                 if word not in noun_obj.actions:
@@ -114,6 +166,13 @@ def extract_nouns_adjectives_verbs(sentence):
             connected_nouns = []  # 새로운 절 시작
         
         i += 1
+    
+    # 명사가 없으면 형용사와 동사 리스트 반환
+    if not noun_objects:
+        return {
+            'adjectives': all_adjectives,
+            'verbs': all_verbs
+        }
     
     return noun_objects
 
@@ -138,6 +197,21 @@ def extract_morphs(text):
     return [morphs]
 
 
+def extract_nouns_only(text):
+    """Kkma로 명사만 추출하여 문자열 리스트로 반환"""
+    text = text.strip()
+    
+    # 형태소 분석
+    tokens = kkma.pos(text)
+    
+    result_nouns = []
+    for word, pos in tokens:
+        if pos.startswith('N'):
+            result_nouns.append(word)
+    
+    return result_nouns
+
+
 def split_sentences_by_connective(text):
     """Kkma와 Okt를 사용하여 동사+연결어미나 접속사로 문장을 분리
     
@@ -146,24 +220,36 @@ def split_sentences_by_connective(text):
     """
     text = text.strip()
     
-    # Kkma 형태소 분석으로 분리
+    # Kkma 형태소 분석으로 분리 지점 찾기
     kkma_tokens = kkma.pos(text)
     
-    sentences = []
-    current_sentence = []
+    # 각 형태소의 누적 위치를 추적하며 분리 지점 찾기
+    split_positions = []  # 분리할 위치들
+    current_pos = 0
     
     for word, pos in kkma_tokens:
-        current_sentence.append(word)
+        # 텍스트에서 현재 형태소 찾기
+        word_pos = text.find(word, current_pos)
+        if word_pos != -1:
+            current_pos = word_pos + len(word)
         
-        # EC: 연결어미 (ECE, ECN 등 포함)
-        # MAJ: 접속사
+        # EC: 연결어미 또는 MAJ: 접속사일 때 분리 지점 기록
         if pos.startswith('EC') or pos == 'MAJ':
-            sentences.append(''.join(current_sentence))
-            current_sentence = []
+            split_positions.append(current_pos)
+    
+    # 분리 지점을 기반으로 문장 분리 (공백 유지)
+    if not split_positions:
+        return [text]
+    
+    sentences = []
+    start = 0
+    for pos in split_positions:
+        sentences.append(text[start:pos])
+        start = pos
     
     # 마지막 문장 추가
-    if current_sentence:
-        sentences.append(''.join(current_sentence))
+    if start < len(text):
+        sentences.append(text[start:])
     
     return [s.strip() for s in sentences if s.strip()]
 
@@ -178,7 +264,7 @@ def load_qa_from_json(json_file):
 if __name__ == "__main__":
     # JSON 파일에서 텍스트 로드
     
-    conversations = load_qa_from_json("conversations.json")
+    conversations = load_qa_from_json("test.json")
     if(not conversations[0].get('text', "").startswith("Q")):    
         print("=" * 60)
         print("[ 명사, 형용사, 동사 추출 결과 ]")
@@ -211,5 +297,62 @@ if __name__ == "__main__":
         print("질문-답변 형식이 감지되었습니다. 질문과 답변을 분리하여 출력합니다.")
         seting = conversations[0:2]
         conversations = conversations[2:]
-
+        seting_text = seting[1].get('text', "")
+        nouns = extract_nouns_adjectives_verbs(seting_text[2:])
+        print(nouns)
+        current_noun = None
+        for i, conversation in enumerate(conversations, 1):
+            text = conversation.get('text', "")
+            if(text.startswith("Q:")):
+                current_noun = None
+                text = text[2:].strip()
+                # Q에서 명사만 추출
+                extracted_items = extract_nouns_only(text)
+                # 추출된 명사와 nouns에 겹치는 단어가 있는지 확인
+                for noun_str in extracted_items:
+                    for noun_obj in nouns:
+                        if noun_str == noun_obj.noun:
+                            current_noun = noun_obj
+                            break
+                    if current_noun is not None:
+                        break
+            elif(text.startswith("A:")):
+                text = text[2:].strip()
+                extract = extract_nouns_adjectives_verbs(text)
+                if current_noun is not None:
+                    # A에서 명사와 형용사 추출
+                    if isinstance(extract, dict):
+                        adjectives = extract.get('adjectives', [])
+                        verbs = extract.get('verbs', [])
+                        current_noun.adjectives.extend(adjectives)
+                        current_noun.actions.extend(verbs)
+                    elif isinstance(extract, list):  # 새로운 명사들이 추출된 경우
+                        for noun_obj in extract:
+                            if noun_obj.noun in [n.noun for n in nouns]:
+                                for n in nouns:
+                                    if noun_obj.noun == n.noun:
+                                        n.adjectives.extend(noun_obj.adjectives)
+                                        n.actions.extend(noun_obj.actions)
+                                        break
+                            else:
+                                nouns.append(noun_obj)
+                else:
+                    if isinstance(extract, list):
+                        for noun_obj in extract:
+                            if(noun_obj.noun in [n.noun for n in nouns]):
+                                for n in nouns:
+                                    if noun_obj.noun == n.noun:
+                                        n.adjectives.extend(noun_obj.adjectives)
+                                        n.actions.extend(noun_obj.actions)
+                                        break
+                            else:
+                                nouns.append(noun_obj)
+        print(nouns)
+# if __name__ == "__main__":
+#         conversations = load_qa_from_json("conversations.json")
+#         text = conversations[0].get('text', "")
+#         texts = split_sentences_by_connective(text)
+#         for text in texts:
+#             tokens = extract_nouns_adjectives_verbs(text)
+#             print(tokens)
 
