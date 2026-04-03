@@ -16,4 +16,4 @@ postprocess_kkma_pos
 {객체 반환:명사 비교후 없으면 추가 있으면 형용사 동사만 전에있던 객체에 추가,리스트 반환:current_noun에 저장된 객체에 추가}
 
 
-
+참고 API: https://koalanlp.github.io/python-support/html/
