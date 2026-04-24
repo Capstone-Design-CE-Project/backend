@@ -15,13 +15,21 @@ kkma = Kkma()
 okt = Okt()
 nouns = []#나왔던 명사 저장
 positions = ["왼쪽", "오른쪽", "위", "아래", "앞", "뒤","전","후","안","밖","속","겉","옆"]#상대적 위치 저장
+
+# 동사 사전: 동사 형태소(어미 제거) → 필요한 역할들
+verb_patterns = {
+    "먹이": ["subject", "indirect_object", "object"],
+    "주": ["subject", "indirect_object", "object"],
+    "먹": ["subject", "object"],
+    "보": ["subject", "object"],
+}
+
 class imagine:
     """명사와 그 수식어(형용사)를 저장하는 클래스"""
     def __init__(self, noun, adjectives=None):
         self.noun = noun  # 명사
         self.adjectives = adjectives if adjectives else []  # 명사의 수식어(형용사)
         self.position = []# (상대적 위치,물체)로 저장하기 위한 리스트
-        self.actions = []  # 명사의 행동
         self.moderators = []  
         self.target = None
     
@@ -38,21 +46,34 @@ class imagine:
         print(f"형용사: {self.adjectives}")
     
     def print_all(self):
-        """명사, 형용사, 동사, 대상 모두 출력"""
+        """명사, 형용사, 위치 모두 출력"""
         print(f"명사: {self.noun}")
         print(f"형용사: {self.adjectives}")
-        print(f"동사: {self.actions}")
-        if self.target:
-            print(f"대상: {self.target}")
         print(f"위치: {self.position}")
         print(f"수식하는 명사들: {self.moderators}")
     
     def __repr__(self):
-<<<<<<< Updated upstream
-        return f"<{self.noun}: {self.adjectives} {self.actions}>"
-=======
-        return f"<{self.noun}: {self.adjectives} {self.actions}{self.position} Target: {self.target} Moderators: {self.moderators}>"
->>>>>>> Stashed changes
+        return f"<{self.noun}: {self.adjectives} {self.position} Moderators: {self.moderators}>"
+
+class Relation:
+    """동사 중심 관계를 저장하는 클래스: (주어, 동사, 목적어, [간접목적어])"""
+    def __init__(self, subject, verb, obj, indirect_object=None):
+        self.subject = subject  # imagine 객체 (주어)
+        self.verb = verb  # 동사
+        self.obj = obj  # imagine 객체 (목적어)
+        self.indirect_object = indirect_object  # imagine 객체 (간접목적어, 선택사항)
+    
+    def __repr__(self):
+        if self.indirect_object:
+            return f"({self.subject.noun} {self.verb} {self.obj.noun}) - {self.indirect_object.noun}에게"
+        return f"({self.subject.noun} {self.verb} {self.obj.noun})"
+    
+    def print_relation(self):
+        """관계 출력"""
+        if self.indirect_object:
+            print(f"({self.subject.noun} {self.verb} {self.obj.noun}) - {self.indirect_object.noun}에게")
+        else:
+            print(f"({self.subject.noun} {self.verb} {self.obj.noun})")
 def map_josa_to_kkma_tag(josa: str) -> str:
 	josa_tag_map = {
 		"이": "JKS",
@@ -98,124 +119,175 @@ def postprocess_kkma_pos(sentence: str):
 
 	return processed
 def extract_nouns_adjectives_verbs(sentence):
-    """한 문장에서 명사, 형용사, 동사를 추출하여 imagine 객체로 반환
-    명사가 없으면 형용사와 동사의 리스트를 반환합니다.
+    """한 문장에서 명사, 형용사, 동사를 추출하여 동사 관계를 생성
     
     Args:
         sentence: 분석할 문장
     
     Returns:
-        - 명사가 있으면: 명사 기준으로 organize된 imagine 객체 리스트
-        - 명사가 없으면: {'adjectives': [형용사들], 'verbs': [동사들]}
+        - 명사가 있으면: {'noun_objects': [imagine 객체들], 'relations': [Relation 객체들]}
+        - 명사가 없으면: {'adjectives': [형용사들], 'verbs': [동사들], 'position': [위치들]}
     """
     sentence = sentence.strip()
     
     # 형태소 분석
     tokens = postprocess_kkma_pos(sentence)
+    print(f"[DEBUG] 형태소 분석: {tokens}")  # 디버깅용
+    
     # 명사별로 정보 저장
-    noun_objects = []  # imagine 객체 리스트
+    noun_dict = {}  # {명사: imagine 객체}
+    noun_order = []  # 명사 등장 순서
+    relations = []  # (주어, 동사, 목적어) 관계
     current_adjectives = []
     current_noun = None
-<<<<<<< Updated upstream
+    current_subject = None  # 현재 문장의 주어 (동사와 연결할)
+    current_indirect_object = None  # 현재 간접 목적어 (에게, 에서 등)
     connected_nouns = []  # 현재 절에서 접속사로 연결된 명사들
     
     # 명사가 없을 때를 위한 추적
     all_adjectives = []
     all_verbs = []
-    
-=======
-    connected_nouns = []  # 현재 절에서 접속사로 연결된 명사들 (개와 고양이 같은 경우)
-    main_noun = None  # 절의 주된 명사 (접속사로 연결된 명사들 중 하나)
-    # 명사가 없을 때를 위한 추적
-    all_adjectives = []
-    all_verbs = []
     all_positions = []
-    moderators = []
->>>>>>> Stashed changes
+    
     i = 0
     while i < len(tokens):
         word, pos = tokens[i]
         
-        
         # 형용사 수집
-<<<<<<< Updated upstream
-        if pos in ['VA'] or word.endswith("색"):
-=======
         if pos in ['VA'] or word.endswith("색") or word.endswith("빛"):  # 형용사 또는 색 명사
->>>>>>> Stashed changes
             current_adjectives.append(word)
             all_adjectives.append(word)  # 전체 형용사 추적
-            # 형용사를 수집하면 바로 이전 명사에 붙이기
-            if current_noun is not None:
-                current_noun.adjectives.extend(current_adjectives)
-                current_adjectives = []
-        # 명사 처리 (색 명사는 이미 형용사로 수집되었으므로, 별도로 명사 처리)
-<<<<<<< Updated upstream
-        elif pos.startswith('N') and word not in positions:
-=======
+        
+        # 명사 처리
         elif pos.startswith('N'):
->>>>>>> Stashed changes
-            # 다음 토큰이 목적격 조사(을/를)인지 확인
+            # 다음 토큰이 조사인지 확인
             if i + 1 < len(tokens):
                 next_word, next_pos = tokens[i + 1]
-                if not next_pos.startswith('JK'):
-                    all_positions.append(word)
-                else:  # 다음이 명사가 아니면 조사 확인
-                    moderators = []
-                    if next_pos == 'JKO':  # 목적격 조사 (을/를)
-                        # 이 명사를 현재 명사의 target으로 설정
-                        if current_noun is not None:
-                            current_noun.target = word
-                        i += 2  # 조사도 스킵
-                        # continue
-                    elif next_pos == 'JKM':  # 위치/방향 조사 (에, 에서, 에게 등)
-                        # 이 명사를 현재 명사의 position에 저장 (조사는 제외)
-                        all_positions.append(word)  # 전체 position 추적
+                
+                if next_pos == 'JKO':  # 목적격 조사 (을/를)
+                    # 이 명사는 목적어
+                    if word not in noun_dict:
+                        new_noun = imagine(word, current_adjectives.copy())
+                        noun_dict[word] = new_noun
+                        noun_order.append(word)
+                    current_noun = noun_dict[word]
+                    current_adjectives = []
+                    i += 2  # 조사도 스킵
+                    continue
+                
+                elif next_pos == 'JKM':  # 위치/방향 조사 (에, 에서, 에게 등)
+                    # 에게는 간접 목적어, 그 외는 위치 정보
+                    if next_word in ['에게', '에게서']:
+                        # 간접 목적어 설정
+                        if word not in noun_dict:
+                            new_noun = imagine(word)
+                            noun_dict[word] = new_noun
+                            noun_order.append(word)
+                        current_indirect_object = noun_dict[word]
+                    else:
+                        # 위치 정보
+                        all_positions.append(word)
                         if current_noun is not None:
                             current_noun.position.append(word)
-                        if tokens[i][0] in positions:
-                            i += 2  # 조사도 스킵
-                            continue
-                        i += 2  # 조사도 스킵
-            # 일반 명사: 새로운 명사 객체 생성
-            new_noun = imagine(word, current_adjectives.copy())
+                    i += 2  # 조사도 스킵
+                    continue
+                
+                elif next_pos.startswith('JK'):  # 다른 조사 (이/가 등)
+                    # 주어 명사
+                    if word not in noun_dict:
+                        new_noun = imagine(word, current_adjectives.copy())
+                        noun_dict[word] = new_noun
+                        noun_order.append(word)
+                    else:
+                        noun_dict[word].adjectives.extend(current_adjectives)
+                    current_noun = noun_dict[word]
+                    current_subject = current_noun  # 주어로 설정
+                    connected_nouns = [current_noun]
+                    current_adjectives = []
+                    i += 2  # 조사도 스킵
+                    continue
             
-            noun_objects.append(new_noun)
-            connected_nouns.append(new_noun)  # 현재 절의 명사 리스트에 추가
-            current_noun = new_noun
+            # 일반 명사: 새로운 명사 객체 생성
+            if word not in noun_dict:
+                new_noun = imagine(word, current_adjectives.copy())
+                noun_dict[word] = new_noun
+                noun_order.append(word)
+            else:
+                noun_dict[word].adjectives.extend(current_adjectives)
+            
+            current_noun = noun_dict[word]
+            connected_nouns.append(current_noun)
             current_adjectives = []
+        
         # 동사 처리
-        elif pos.startswith('VV'):
-            all_verbs.append(word)  # 전체 동사 추적
-            # 현재 절의 모든 명사에 동사 추가 (접속사로 연결된 명사들 포함)
-            for noun_obj in connected_nouns:
-                if word not in noun_obj.actions:
-                    noun_obj.actions.append(word)
+        elif pos in ['VV', 'VXV']:  # 일반 동사와 보조동사 모두 처리
+            all_verbs.append(word)
+            
+            # 동사 사전 확인
+            if word in verb_patterns:
+                pattern = verb_patterns[word]
+                nouns_in_order = [noun_dict[n] for n in noun_order]
+                
+                # 패턴에 따라 명사 매핑
+                subject = None
+                indirect_object = None
+                obj = None
+                
+                for idx, role in enumerate(pattern):
+                    if idx < len(nouns_in_order):
+                        if role == "subject":
+                            subject = nouns_in_order[idx]
+                        elif role == "indirect_object":
+                            indirect_object = nouns_in_order[idx]
+                        elif role == "object":
+                            obj = nouns_in_order[idx]
+                
+                # 관계 생성
+                if subject is not None and obj is not None:
+                    relation = Relation(subject, word, obj, indirect_object=indirect_object)
+                    relations.append(relation)
+            else:
+                # 사전에 없으면 기존 로직 사용
+                subject_for_relation = current_subject
+                if subject_for_relation is None and len(noun_order) > 0:
+                    subject_for_relation = noun_dict[noun_order[0]]
+                
+                if subject_for_relation is not None and current_noun is not None:
+                    if current_noun != subject_for_relation:
+                        relation = Relation(subject_for_relation, word, current_noun, indirect_object=current_indirect_object)
+                        relations.append(relation)
+                        current_indirect_object = None
+        
         # 종결어미 처리 - 절이 끝남
         elif pos.startswith('EF'):
-            connected_nouns = []  # 새로운 절 시작
+            # 마지막 형용사를 현재 명사에 붙이기
+            if current_adjectives and current_noun is not None:
+                current_noun.adjectives.extend(current_adjectives)
+                current_adjectives = []
+            connected_nouns = []
+            current_subject = None
+            current_indirect_object = None
         
         i += 1
     
-<<<<<<< Updated upstream
-    # 명사가 없으면 형용사와 동사 리스트 반환
-    if not noun_objects:
-        return {
-            'adjectives': all_adjectives,
-            'verbs': all_verbs
-        }
+    # 루프 종료 후 남은 형용사가 있으면 현재 명사에 붙이기
+    if current_adjectives and current_noun is not None:
+        current_noun.adjectives.extend(current_adjectives)
     
-=======
     # 명사가 없으면 형용사, 동사, position 리스트 반환
-    if not noun_objects:
+    if not noun_dict:
         return {
             'adjectives': all_adjectives,
             'verbs': all_verbs,
             'position': all_positions
         }
-    print(f"명사 객체 리스트: {noun_objects}")
->>>>>>> Stashed changes
-    return noun_objects
+    
+    # 명사가 있으면 명사 객체 리스트와 관계 리스트 반환
+    noun_objects = [noun_dict[noun] for noun in noun_order]
+    return {
+        'noun_objects': noun_objects,
+        'relations': relations
+    }
 
 
 def extract_pos(text):
@@ -305,7 +377,7 @@ def load_qa_from_json(json_file):
 if __name__ == "__main__":
     # JSON 파일에서 텍스트 로드
     
-    conversations = load_qa_from_json("test.json")
+    conversations = load_qa_from_json("conversations.json")
     if(not conversations[0].get('text', "").startswith("Q")):    
         print("=" * 60)
         print("[ 명사, 형용사, 동사 추출 결과 ]")
@@ -322,23 +394,29 @@ if __name__ == "__main__":
             # 각 문장에서 명사, 형용사, 동사 추출
             print("\n📝 추출 결과:")
             for j, sentence in enumerate(split_sentences, 1):
-                nouns = extract_nouns_adjectives_verbs(sentence)
+                result = extract_nouns_adjectives_verbs(sentence)
                 print(f"  [{j}] {sentence}")
-                if isinstance(nouns, dict):
-                    print(f"      형용사: {nouns.get('adjectives', [])}")
-                    print(f"      동사: {nouns.get('verbs', [])}")
-                    print(f"      위치 정보: {nouns.get('position', [])}")
-                else:
-                    for noun_obj in nouns:
-                        print(f"      명사: {noun_obj.noun}")
-                        if noun_obj.adjectives:
-                            print(f"      형용사: {noun_obj.adjectives}")
-                        if noun_obj.actions:
-                            print(f"      동사: {noun_obj.actions}")
-                        if noun_obj.target:
-                            print(f"      대상(Target): {noun_obj.target}")
-                        if noun_obj.moderators:
-                            print(f"      수식하는 명사들: {noun_obj.moderators}")
+                if isinstance(result, dict):
+                    if 'noun_objects' in result:  # 명사가 있는 경우
+                        noun_objects = result['noun_objects']
+                        relations = result['relations']
+                        
+                        print(f"      명사 객체들:")
+                        for noun_obj in noun_objects:
+                            print(f"        - {noun_obj.noun}", end="")
+                            if noun_obj.adjectives:
+                                print(f" (형용사: {noun_obj.adjectives})", end="")
+                            if noun_obj.position:
+                                print(f" (위치: {noun_obj.position})", end="")
+                            print()
+                        
+                        print(f"      동사 관계:")
+                        for relation in relations:
+                            print(f"        - {relation}")
+                    else:  # 명사가 없는 경우
+                        print(f"      형용사: {result.get('adjectives', [])}")
+                        print(f"      동사: {result.get('verbs', [])}")
+                        print(f"      위치 정보: {result.get('position', [])}")
                 
         
         print("\n" + "=" * 60)
@@ -347,9 +425,17 @@ if __name__ == "__main__":
         seting = conversations[0:2]
         conversations = conversations[2:]
         seting_text = seting[1].get('text', "")
-        nouns = extract_nouns_adjectives_verbs(seting_text[2:])
-        print(nouns)
+        result = extract_nouns_adjectives_verbs(seting_text[2:])
+        
+        # result가 dict이고 noun_objects가 있는 경우
+        if isinstance(result, dict) and 'noun_objects' in result:
+            nouns = result['noun_objects']
+        else:
+            nouns = []
+        
+        print(f"설정 명사 객체: {nouns}")
         current_noun = None
+        
         for i, conversation in enumerate(conversations, 1):
             text = conversation.get('text', "")
             if(text.startswith("Q:")):
@@ -367,46 +453,21 @@ if __name__ == "__main__":
                         break
             elif(text.startswith("A:")):
                 text = text[2:].strip()
-                extract = extract_nouns_adjectives_verbs(text)
+                result = extract_nouns_adjectives_verbs(text)
+                
                 if current_noun is not None:
                     # A에서 명사와 형용사 추출
-                    if isinstance(extract, dict):
-                        adjectives = extract.get('adjectives', [])
-                        verbs = extract.get('verbs', [])
-                        current_noun.adjectives.extend(adjectives)
-                        current_noun.actions.extend(verbs)
-                    elif isinstance(extract, list):  # 새로운 명사들이 추출된 경우
-                        for noun_obj in extract:
-                            if noun_obj.noun in [n.noun for n in nouns]:
-                                for n in nouns:
-                                    if noun_obj.noun == n.noun:
-                                        n.adjectives.extend(noun_obj.adjectives)
-                                        n.actions.extend(noun_obj.actions)
-                                        break
-                            else:
-                                nouns.append(noun_obj)
-                else:
-                    if isinstance(extract, list):
-                        for noun_obj in extract:
-                            if(noun_obj.noun in [n.noun for n in nouns]):
-                                for n in nouns:
-                                    if noun_obj.noun == n.noun:
-                                        n.adjectives.extend(noun_obj.adjectives)
-                                        n.actions.extend(noun_obj.actions)
-                                        break
-                            else:
-                                nouns.append(noun_obj)
-        print(nouns)
-# if __name__ == "__main__":
-#         conversations = load_qa_from_json("conversations.json")
-#         text = conversations[0].get('text', "")
-#         texts = split_sentences_by_connective(text)
-#         for text in texts:
-#             tokens = extract_nouns_adjectives_verbs(text)
-#             print(tokens)
-<<<<<<< Updated upstream
-=======
-                
+                    if isinstance(result, dict):
+                        if 'noun_objects' in result:  # 명사가 있는 경우
+                            extract_nouns_list = result['noun_objects']
+                            for noun_obj in extract_nouns_list:
+                                current_noun.adjectives.extend(noun_obj.adjectives)
+                        else:  # 명사가 없고 형용사/동사만 있는 경우
+                            adjectives = result.get('adjectives', [])
+                            current_noun.adjectives.extend(adjectives)
+        
+        print("\n최종 명사 객체:")
+        for noun_obj in nouns:
+            noun_obj.print_all()
 
->>>>>>> Stashed changes
 
