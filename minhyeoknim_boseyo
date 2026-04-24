@@ -1,0 +1,443 @@
+import os
+from konlpy.tag import Kkma
+from konlpy.tag import Okt
+import re
+import warnings
+import logging
+import time
+
+# 경고 무시
+warnings.filterwarnings('ignore')
+logging.getLogger('jpype').setLevel(logging.ERROR)
+
+kkma = Kkma()
+okt = Okt()
+nouns = [] # 나왔던 명사 저장
+positions = ["왼쪽", "오른쪽", "위", "아래", "앞", "뒤","전","후","안","밖","속","겉","옆"] # 상대적 위치 저장
+
+# [Level 3] 회상 치료 특화 위험어 사전 (추가됨)
+DANGER_WORDS = ["죽", "피", "때리", "부러지", "자살", "사고", "다치", "훔치"]
+
+def is_safe_sentence(text):
+    """[Level 3] 위험어 필터링: 문장에 위험한 단어가 포함되어 있는지 확인"""
+    for danger in DANGER_WORDS:
+        if danger in text:
+            return False
+    return True
+
+def mask_pii(text):
+    """[Level 3] 개인정보(PII) 비식별화: 전화번호, 주민번호 등 마스킹"""
+    # 휴대폰 번호 마스킹 (예: 010-1234-5678 -> 010-****-****)
+    text = re.sub(r'01[016789]-?\d{3,4}-?\d{4}', '010-****-****', text)
+    # 주민등록번호 마스킹
+    text = re.sub(r'\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])-?[1-4]\d{6}', '******-*******', text)
+    return text
+
+def get_base_form(word):
+    """[Level 1] 동사/형용사 원형 복원 (Lemmatization)"""
+    tokens = okt.pos(word, stem=True)
+    if tokens:
+        return tokens[0][0] # 원형 반환
+    return word
+
+# 동사 사전: 동사 원형 기준 → 필요한 역할들
+# (이전에는 '먹이' 였으나, 이제 원형 복원이 되므로 '먹이다', '주다', '먹다' 로 기준을 변경하는 것이 좋습니다)
+verb_patterns = {
+    "먹이다": ["subject", "indirect_object", "object"],
+    "주다": ["subject", "indirect_object", "object"],
+    "먹다": ["subject", "object"],
+    "보다": ["subject", "object"],
+}
+
+class imagine:
+    """명사와 그 수식어(형용사)를 저장하는 클래스"""
+    def __init__(self, noun, adjectives=None):
+        self.noun = noun  # 명사
+        self.adjectives = adjectives if adjectives else []  # 명사의 수식어(형용사 원형)
+        self.position = [] # (상대적 위치,물체)로 저장하기 위한 리스트
+        self.moderators = []  
+        self.target = None
+    
+    def add_adjective(self, adjective):
+        self.adjectives.append(adjective)
+    
+    def print_noun(self):
+        print(f"명사: {self.noun}")
+    
+    def print_adjectives(self):
+        print(f"형용사: {self.adjectives}")
+    
+    def print_all(self):
+        print(f"명사: {self.noun}")
+        print(f"형용사: {self.adjectives}")
+        print(f"위치: {self.position}")
+        print(f"수식하는 명사들: {self.moderators}")
+    
+    def __repr__(self):
+        return f"<{self.noun}: {self.adjectives} {self.position} Moderators: {self.moderators}>"
+
+class Relation:
+    """[Level 2] 동사 중심 관계를 저장하는 클래스: (주어, 원형 동사, 목적어, [간접목적어])"""
+    def __init__(self, subject, verb, obj, indirect_object=None):
+        self.subject = subject  # imagine 객체 (주어)
+        self.verb = verb  # 동사 (원형)
+        self.obj = obj  # imagine 객체 (목적어)
+        self.indirect_object = indirect_object  # imagine 객체 (간접목적어, 선택사항)
+    
+    def __repr__(self):
+        if self.indirect_object:
+            return f"({self.subject.noun} {self.verb} {self.obj.noun}) - {self.indirect_object.noun}에게"
+        return f"({self.subject.noun} {self.verb} {self.obj.noun})"
+    
+    def print_relation(self):
+        if self.indirect_object:
+            print(f"({self.subject.noun} {self.verb} {self.obj.noun}) - {self.indirect_object.noun}에게")
+        else:
+            print(f"({self.subject.noun} {self.verb} {self.obj.noun})")
+
+def map_josa_to_kkma_tag(josa: str) -> str:
+    josa_tag_map = {
+        "이": "JKS", "가": "JKS",
+        "은": "JX", "는": "JX",
+        "을": "JKO", "를": "JKO",
+        "에": "JKM", "에서": "JKM", "에게": "JKM",
+        "의": "JKG",
+        "와": "JC", "과": "JC", "랑": "JC",
+        "도": "JX", "만": "JX",
+    }
+    return josa_tag_map.get(josa, "JX")
+
+def postprocess_kkma_pos(sentence: str):
+    raw = kkma.pos(sentence)
+    processed = []
+
+    for word, pos in raw:
+        if pos in {"NNG", "NNP"}:
+            okt_tokens = okt.pos(word, norm=True, stem=True)
+            if (
+                len(okt_tokens) == 2
+                and okt_tokens[0][1] == "Noun"
+                and okt_tokens[1][1] == "Josa"
+            ):
+                noun = okt_tokens[0][0]
+                josa = okt_tokens[1][0]
+                if noun + josa == word:
+                    processed.append((noun, pos))
+                    processed.append((josa, map_josa_to_kkma_tag(josa)))
+                    continue
+
+        processed.append((word, pos))
+    return processed
+
+def extract_nouns_adjectives_verbs(sentence):
+    """한 문장에서 명사, 형용사, 동사를 추출하여 동사 관계를 생성"""
+    
+    # [Level 3] PII 마스킹 및 위험어 차단 로직 적용
+    sentence = sentence.strip()
+    sentence = mask_pii(sentence)
+    
+    if not is_safe_sentence(sentence):
+        # 딕셔너리로 반환하되, 플래그를 통해 안전하지 않음을 상위에서 인지하도록 함
+        return {"error": "DANGER_WORD_DETECTED"}
+
+    # 형태소 분석
+    tokens = postprocess_kkma_pos(sentence)
+    # print(f"[DEBUG] 형태소 분석: {tokens}")  # 디버깅용
+    
+    noun_dict = {}  
+    noun_order = []  
+    relations = []  
+    current_adjectives = []
+    current_noun = None
+    current_subject = None  
+    current_indirect_object = None  
+    connected_nouns = []  
+    
+    all_adjectives = []
+    all_verbs = []
+    all_positions = []
+    
+    i = 0
+    while i < len(tokens):
+        word, pos = tokens[i]
+        
+        # [Level 1] 형용사 수집 및 원형 복원
+        if pos in ['VA'] or word.endswith("색") or word.endswith("빛"):  
+            base_word = get_base_form(word) if pos == 'VA' else word
+            current_adjectives.append(base_word)
+            all_adjectives.append(base_word)
+        
+        # 명사 처리
+        elif pos.startswith('N'):
+            if i + 1 < len(tokens):
+                next_word, next_pos = tokens[i + 1]
+                
+                if next_pos == 'JKO':  # 목적어
+                    if word not in noun_dict:
+                        new_noun = imagine(word, current_adjectives.copy())
+                        noun_dict[word] = new_noun
+                        noun_order.append(word)
+                    current_noun = noun_dict[word]
+                    current_adjectives = []
+                    i += 2  
+                    continue
+                
+                elif next_pos == 'JKM':  # 위치/방향 조사
+                    if next_word in ['에게', '에게서']:
+                        if word not in noun_dict:
+                            new_noun = imagine(word)
+                            noun_dict[word] = new_noun
+                            noun_order.append(word)
+                        current_indirect_object = noun_dict[word]
+                    else:
+                        all_positions.append(word)
+                        if current_noun is not None:
+                            current_noun.position.append(word)
+                    i += 2  
+                    continue
+                
+                elif next_pos.startswith('JK'):  # 주어
+                    if word not in noun_dict:
+                        new_noun = imagine(word, current_adjectives.copy())
+                        noun_dict[word] = new_noun
+                        noun_order.append(word)
+                    else:
+                        noun_dict[word].adjectives.extend(current_adjectives)
+                    current_noun = noun_dict[word]
+                    current_subject = current_noun  
+                    connected_nouns = [current_noun]
+                    current_adjectives = []
+                    i += 2  
+                    continue
+            
+            # 일반 명사
+            if word not in noun_dict:
+                new_noun = imagine(word, current_adjectives.copy())
+                noun_dict[word] = new_noun
+                noun_order.append(word)
+            else:
+                noun_dict[word].adjectives.extend(current_adjectives)
+            
+            current_noun = noun_dict[word]
+            connected_nouns.append(current_noun)
+            current_adjectives = []
+        
+        # [Level 1] 동사 처리 및 원형 복원
+        elif pos in ['VV', 'VXV']:  
+            base_verb = get_base_form(word)  # '먹였다' -> '먹이다' 로 변환
+            all_verbs.append(base_verb)
+            
+            # 동사 사전 확인 (원형 기준으로 매핑)
+            if base_verb in verb_patterns:
+                pattern = verb_patterns[base_verb]
+                nouns_in_order = [noun_dict[n] for n in noun_order]
+                
+                subject = None
+                indirect_object = None
+                obj = None
+                
+                for idx, role in enumerate(pattern):
+                    if idx < len(nouns_in_order):
+                        if role == "subject":
+                            subject = nouns_in_order[idx]
+                        elif role == "indirect_object":
+                            indirect_object = nouns_in_order[idx]
+                        elif role == "object":
+                            obj = nouns_in_order[idx]
+                
+                if subject is not None and obj is not None:
+                    relation = Relation(subject, base_verb, obj, indirect_object=indirect_object)
+                    relations.append(relation)
+            else:
+                # 사전에 없으면 기존 로직 사용
+                subject_for_relation = current_subject
+                if subject_for_relation is None and len(noun_order) > 0:
+                    subject_for_relation = noun_dict[noun_order[0]]
+                
+                if subject_for_relation is not None and current_noun is not None:
+                    if current_noun != subject_for_relation:
+                        relation = Relation(subject_for_relation, base_verb, current_noun, indirect_object=current_indirect_object)
+                        relations.append(relation)
+                        current_indirect_object = None
+        
+        # 종결어미 처리
+        elif pos.startswith('EF'):
+            if current_adjectives and current_noun is not None:
+                current_noun.adjectives.extend(current_adjectives)
+                current_adjectives = []
+            connected_nouns = []
+            current_subject = None
+            current_indirect_object = None
+        
+        i += 1
+    
+    if current_adjectives and current_noun is not None:
+        current_noun.adjectives.extend(current_adjectives)
+    
+    if not noun_dict:
+        return {
+            'adjectives': all_adjectives,
+            'verbs': all_verbs,
+            'position': all_positions
+        }
+    
+    noun_objects = [noun_dict[noun] for noun in noun_order]
+    return {
+        'noun_objects': noun_objects,
+        'relations': relations
+    }
+
+
+def extract_pos(text):
+    text = text.strip()
+    tokens = kkma.pos(text)
+    return [tokens]
+
+def extract_morphs(text):
+    text = text.strip()
+    morphs = kkma.morphs(text)
+    return [morphs]
+
+def extract_nouns_only(text):
+    text = text.strip()
+    tokens = kkma.pos(text)
+    result_nouns = []
+    for word, pos in tokens:
+        if pos.startswith('N'):
+            result_nouns.append(word)
+    return result_nouns
+
+def split_sentences_by_connective(text):
+    text = text.strip()
+    kkma_tokens = kkma.pos(text)
+    split_positions = []  
+    current_pos = 0
+    
+    for word, pos in kkma_tokens:
+        word_pos = text.find(word, current_pos)
+        if word_pos != -1:
+            current_pos = word_pos + len(word)
+        
+        if pos.startswith('EC') or pos == 'MAJ':
+            split_positions.append(current_pos)
+    
+    if not split_positions:
+        return [text]
+    
+    sentences = []
+    start = 0
+    for pos in split_positions:
+        sentences.append(text[start:pos])
+        start = pos
+    
+    if start < len(text):
+        sentences.append(text[start:])
+    
+    return [s.strip() for s in sentences if s.strip()]
+
+def load_qa_from_json(json_file):
+    import json
+    with open(json_file, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+if __name__ == "__main__":
+    # JSON 파일이 실제로 존재하지 않으면 오류가 나므로 예외처리 블록을 추가하거나 주석처리하여 테스트하세요.
+    try:
+        conversations = load_qa_from_json("conversations.json")
+        
+        if not conversations[0].get('text', "").startswith("Q"):    
+            print("=" * 60)
+            print("[ 명사, 형용사, 동사 추출 결과 ]")
+            print("=" * 60)
+            
+            for i, conversation in enumerate(conversations, 1):
+                text = conversation.get('text', "")
+                print(f"\n원문 [{i}]: {text}")
+                
+                split_sentences = split_sentences_by_connective(text)
+                print(f"분리된 문장: {split_sentences}")
+                
+                print("\n📝 추출 결과:")
+                for j, sentence in enumerate(split_sentences, 1):
+                    result = extract_nouns_adjectives_verbs(sentence)
+                    print(f"  [{j}] {sentence}")
+                    
+                    # [Level 3] 위험어 감지 시 스킵 로직
+                    if isinstance(result, dict) and result.get("error") == "DANGER_WORD_DETECTED":
+                        print("      [주의] 임상적 위험어가 포함되어 필터링 되었습니다.")
+                        continue
+                        
+                    if isinstance(result, dict):
+                        if 'noun_objects' in result: 
+                            noun_objects = result['noun_objects']
+                            relations = result['relations']
+                            
+                            print(f"      명사 객체들:")
+                            for noun_obj in noun_objects:
+                                print(f"        - {noun_obj.noun}", end="")
+                                if noun_obj.adjectives:
+                                    print(f" (형용사: {noun_obj.adjectives})", end="")
+                                if noun_obj.position:
+                                    print(f" (위치: {noun_obj.position})", end="")
+                                print()
+                            
+                            print(f"      동사 관계:")
+                            for relation in relations:
+                                print(f"        - {relation}")
+                        else: 
+                            print(f"      형용사: {result.get('adjectives', [])}")
+                            print(f"      동사: {result.get('verbs', [])}")
+                            print(f"      위치 정보: {result.get('position', [])}")
+            print("\n" + "=" * 60)
+            
+        else:
+            print("질문-답변 형식이 감지되었습니다. 질문과 답변을 분리하여 출력합니다.")
+            seting = conversations[0:2]
+            conversations = conversations[2:]
+            seting_text = seting[1].get('text', "")
+            result = extract_nouns_adjectives_verbs(seting_text[2:])
+            
+            if isinstance(result, dict) and 'noun_objects' in result:
+                nouns = result['noun_objects']
+            else:
+                nouns = []
+            
+            print(f"설정 명사 객체: {nouns}")
+            current_noun = None
+            
+            for i, conversation in enumerate(conversations, 1):
+                text = conversation.get('text', "")
+                if text.startswith("Q:"):
+                    current_noun = None
+                    text = text[2:].strip()
+                    extracted_items = extract_nouns_only(text)
+                    for noun_str in extracted_items:
+                        for noun_obj in nouns:
+                            if noun_str == noun_obj.noun:
+                                current_noun = noun_obj
+                                break
+                        if current_noun is not None:
+                            break
+                elif text.startswith("A:"):
+                    text = text[2:].strip()
+                    result = extract_nouns_adjectives_verbs(text)
+                    
+                    if isinstance(result, dict) and result.get("error") == "DANGER_WORD_DETECTED":
+                        print("  [주의] 임상적 위험어 필터링됨")
+                        continue
+
+                    if current_noun is not None:
+                        if isinstance(result, dict):
+                            if 'noun_objects' in result: 
+                                extract_nouns_list = result['noun_objects']
+                                for noun_obj in extract_nouns_list:
+                                    current_noun.adjectives.extend(noun_obj.adjectives)
+                            else: 
+                                adjectives = result.get('adjectives', [])
+                                current_noun.adjectives.extend(adjectives)
+            
+            print("\n최종 명사 객체:")
+            for noun_obj in nouns:
+                noun_obj.print_all()
+    except FileNotFoundError:
+        print("conversations.json 파일이 없어 실행을 종료합니다.")
