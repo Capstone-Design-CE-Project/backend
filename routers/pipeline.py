@@ -15,7 +15,7 @@ import promptmaker
 # 팀원 A 형태소 분석 코드 import
 # extract.py가 같은 폴더에 있어야 함
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from extract import extract_nouns_adjectives_verbs, split_sentences_by_connective
+from promptmaker_first import extract_nouns_adjectives_verbs, split_sentences_by_connective
 
 load_dotenv()
 

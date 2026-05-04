@@ -1,71 +1,101 @@
-from sqlalchemy.orm import Session as DBSession
-from models import QaLog, Noun, Adjective, Verb
+import os
+import psycopg2
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
-# ── 1. STT 결과 → qa_log 저장 ─────────────────────────────────
+# ── DB 연결 ────────────────────────────────────────────────────
+def get_conn():
+    return psycopg2.connect(
+        host=os.getenv("DB_HOST"),
+        port=os.getenv("DB_PORT"),
+        dbname=os.getenv("DB_NAME"),
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASSWORD")
+    )
 
-def save_stt_result(
-    session_id: int,
-    text: str,
-    order_index: int,
-    qa_type: str,
-    db: DBSession
-) -> QaLog:
+
+# ── 1. 화자 분리된 세그먼트 → qa_log 저장 ─────────────────────
+def save_segments_to_db(session_id: int, segments: list):
     """
-    CLOVA STT 변환 텍스트를 qa_log 테이블에 저장
+    CLOVA STT 화자 분리 결과를 qa_log 테이블에 저장
+
+    화자 1 → 상담사 → type = 'Q'
+    화자 2 → 어르신 → type = 'A'
 
     Args:
-        session_id:  상담 세션 ID
-        text:        STT 변환된 텍스트
-        order_index: Q&A 순서 번호
-        qa_type:     'Q' 또는 'A'
-        db:          DB 세션
+        session_id: 상담 세션 ID
+        segments:   clova_speech.transcribe()의 segments 결과
+                    [{"speaker": "1", "text": "..."}, ...]
     """
-    qa = QaLog(
-        session_id=session_id,
-        type=qa_type,
-        text=text,
-        order_index=order_index
-    )
-    db.add(qa)
-    db.commit()
-    print(f"[DB] qa_log 저장 완료 (type={qa_type}): {text[:30]}...")
-    return qa
+    if not segments:
+        print("[DB] 저장할 세그먼트 없음")
+        return
+
+    conn = get_conn()
+    cur  = conn.cursor()
+
+    for i, seg in enumerate(segments):
+        speaker = seg.get("speaker", "1")
+        text    = seg.get("text", "").strip()
+
+        if not text:
+            continue
+
+        # 화자 1 = 상담사(Q), 화자 2 = 어르신(A)
+        qa_type = "Q" if speaker == "1" else "A"
+
+        cur.execute("""
+            INSERT INTO qa_log (session_id, type, text, order_index)
+            VALUES (%s, %s, %s, %s)
+        """, (session_id, qa_type, text, i + 1))
+
+        print(f"[DB] qa_log 저장 (type={qa_type}, 화자={speaker}): {text[:30]}...")
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    print(f"[DB] 전체 {len(segments)}개 발화 저장 완료")
 
 
-# ── 2. 형태소 분석 결과 → DB 저장 ─────────────────────────────
+# ── 2. 전문만 저장할 때 (화자 분리 없이 원문 보존용) ───────────
+def save_full_text_to_db(session_id: int, full_text: str, order_index: int):
+    """
+    화자 분리 없이 전체 텍스트를 qa_log에 저장
+    (백업용 또는 화자 분리 실패 시 사용)
+    """
+    conn = get_conn()
+    cur  = conn.cursor()
 
-def save_morphs_to_db(
-    session_id: int,
-    result: dict,
-    db: DBSession
-):
+    cur.execute("""
+        INSERT INTO qa_log (session_id, type, text, order_index)
+        VALUES (%s, %s, %s, %s)
+    """, (session_id, "A", full_text, order_index))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    print(f"[DB] 전문 저장 완료: {full_text[:30]}...")
+
+
+# ── 3. 형태소 분석 결과 → noun/adjective/verb 저장 ────────────
+def save_morphs_to_db(session_id: int, result: dict):
     """
     extract_nouns_adjectives_verbs() 결과를
     noun / adjective / verb 테이블에 저장
 
-    현재 버전 result 형태:
-    {
-        'noun_objects': [imagine 객체들],
-        'relations':    [Relation 객체들]
-    }
-    또는 명사가 없을 때:
-    {
-        'adjectives': [...],
-        'verbs':      [...],
-        'position':   [...]
-    }
+    어르신(화자 2) 발화에서 추출된 결과만 저장
     """
-    # 명사가 없는 경우 저장 생략
     if 'noun_objects' not in result:
-        print("[DB] 명사 없음 - 저장 생략")
+        print("[DB] 명사 없음 - 형태소 저장 생략")
         return
 
     noun_objects = result.get('noun_objects', [])
     relations    = result.get('relations',    [])
+
+    conn = get_conn()
+    cur  = conn.cursor()
 
     for noun_obj in noun_objects:
 
@@ -76,67 +106,88 @@ def save_morphs_to_db(
                 target = rel.subject.noun
                 break
 
-        # noun 저장
-        noun = Noun(
-            session_id=session_id,
-            value=noun_obj.noun,
-            target_noun=target,
-            is_base_noun=False
-        )
-        db.add(noun)
-        db.flush()  # INSERT 후 id 먼저 확보
+        # noun 저장 후 id 받기
+        cur.execute("""
+            INSERT INTO noun (session_id, value, target_noun, is_base_noun)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id
+        """, (session_id, noun_obj.noun, target, False))
+
+        noun_id = cur.fetchone()[0]
 
         # adjective 저장
         for adj in noun_obj.adjectives:
             if adj.strip():
-                db.add(Adjective(noun_id=noun.id, value=adj))
+                cur.execute("""
+                    INSERT INTO adjective (noun_id, value)
+                    VALUES (%s, %s)
+                """, (noun_id, adj))
 
-        # position 정보도 adjective로 저장 (위치 수식어)
+        # position(위치 정보)도 adjective로 저장
         for pos in noun_obj.position:
             if pos.strip():
-                db.add(Adjective(noun_id=noun.id, value=pos))
+                cur.execute("""
+                    INSERT INTO adjective (noun_id, value)
+                    VALUES (%s, %s)
+                """, (noun_id, pos))
 
-        # moderators → 수식 명사도 adjective로 저장
+        # moderators(수식 명사)도 adjective로 저장
         for mod in noun_obj.moderators:
             if isinstance(mod, str) and mod.strip():
-                db.add(Adjective(noun_id=noun.id, value=mod))
+                cur.execute("""
+                    INSERT INTO adjective (noun_id, value)
+                    VALUES (%s, %s)
+                """, (noun_id, mod))
 
-    db.commit()
+    conn.commit()
+    cur.close()
+    conn.close()
     print(f"[DB] 형태소 분석 결과 저장 완료: {len(noun_objects)}개 명사")
 
 
-# ── 3. DB에서 꺼내서 장면 설명 조합 ───────────────────────────
-
-def make_scene_description(session_id: int, db: DBSession) -> str:
+# ── 4. DB에서 꺼내서 장면 설명 조합 ───────────────────────────
+def make_scene_description(session_id: int) -> str:
     """
     noun / adjective 테이블에서 데이터를 꺼내
-    DALL-E 프롬프트용 한국어 장면 설명 문장 생성
+    DALL-E 프롬프트용 한국어 장면 설명 생성
 
     Returns:
         예) "남색 등대, 흰색 배 (등대 근처에), 바닷가"
     """
-    nouns = db.query(Noun).filter(
-        Noun.session_id == session_id
-    ).all()
+    conn = get_conn()
+    cur  = conn.cursor()
 
-    if not nouns:
+    cur.execute("""
+        SELECT
+            n.id,
+            n.value,
+            n.target_noun,
+            ARRAY_AGG(a.value) FILTER (WHERE a.value IS NOT NULL) AS adjectives
+        FROM noun n
+        LEFT JOIN adjective a ON a.noun_id = n.id
+        WHERE n.session_id = %s
+        GROUP BY n.id, n.value, n.target_noun
+        ORDER BY n.id
+    """, (session_id,))
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    if not rows:
         print("[PROMPT] 명사 없음 - 장면 설명 생성 불가")
         return ""
 
     parts = []
-    for noun in nouns:
-        adjs = [a.value for a in noun.adjectives]
+    for row in rows:
+        _, value, target_noun, adjectives = row
 
         line = ""
-
-        # 형용사 + 명사
-        if adjs:
-            line += " ".join(adjs) + " "
-        line += noun.value
-
-        # target 관계
-        if noun.target_noun:
-            line += f" ({noun.target_noun} 근처에)"
+        if adjectives:
+            line += " ".join(adjectives) + " "
+        line += value
+        if target_noun:
+            line += f" ({target_noun} 근처에)"
 
         parts.append(line)
 
@@ -145,18 +196,9 @@ def make_scene_description(session_id: int, db: DBSession) -> str:
     return scene
 
 
-# ── 4. 장면 설명 → DALL-E 영문 프롬프트 ──────────────────────
-
+# ── 5. 장면 설명 → DALL-E 영문 프롬프트 ──────────────────────
 def make_dalle_prompt(scene_description: str) -> str:
-    """
-    한국어 장면 설명을 DALL-E 3 영문 프롬프트로 변환
-
-    Args:
-        scene_description: make_scene_description()의 결과
-
-    Returns:
-        DALL-E에 넘길 영문 프롬프트
-    """
+    """한국어 장면 설명 → DALL-E 3 영문 프롬프트 변환"""
     if not scene_description:
         return (
             "A warm Korean watercolor illustration of a peaceful countryside. "
@@ -170,3 +212,18 @@ def make_dalle_prompt(scene_description: str) -> str:
         f"No violence or negative elements, "
         f"peaceful and emotional atmosphere, traditional Korean scenery."
     )
+def clear_session_data(session_id: int):
+    """테스트용 - 해당 세션 데이터 전체 초기화"""
+    conn = get_conn()
+    cur  = conn.cursor()
+
+    cur.execute("DELETE FROM adjective WHERE noun_id IN (SELECT id FROM noun WHERE session_id = %s)", (session_id,))
+    cur.execute("DELETE FROM verb       WHERE noun_id IN (SELECT id FROM noun WHERE session_id = %s)", (session_id,))
+    cur.execute("DELETE FROM noun       WHERE session_id = %s", (session_id,))
+    cur.execute("DELETE FROM qa_log     WHERE session_id = %s", (session_id,))
+    cur.execute("DELETE FROM album      WHERE session_id = %s", (session_id,))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    print(f"[DB] session_id={session_id} 데이터 초기화 완료")
