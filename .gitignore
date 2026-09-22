@@ -1,0 +1,17 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+/tmp/
+*.egg-info/
+dist/
+build/
+
+# 로컬 개발용
+uploads/
+*.db
+capstone.db
+.venv/
+venv/
+.pytest_cache/
