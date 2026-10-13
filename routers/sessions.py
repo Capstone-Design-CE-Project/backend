@@ -10,7 +10,6 @@
   session-detail      → GET  /sessions/{id}
 """
 import secrets
-from datetime import datetime
 from typing import List, Optional
 
 from fastapi import (
@@ -20,6 +19,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from core.deps import get_current_counselor, get_owned_client, get_owned_session
 from core.security import generate_code
+from core.timeutil import now_local
 from database import get_db
 from models import (
     Album, Appointment, AppointmentStatus, Counselor, CounselSession,
@@ -67,7 +67,7 @@ def start_session(
         counselor_id=counselor.id,
         title=payload.title,
         status=SessionStatus.RECORDING,
-        started_at=datetime.now(),
+        started_at=now_local(),
     )
     db.add(sess)
 
@@ -84,7 +84,7 @@ def start_session(
         if appt:
             appt.status = AppointmentStatus.DONE
 
-    client.last_visit_at = datetime.now()
+    client.last_visit_at = now_local()
     db.commit()
     db.refresh(sess)
     return serializers.session_detail(sess)
@@ -191,7 +191,7 @@ def upload_recording(
 
     sess.transcript = full_text
     sess.status = SessionStatus.TRANSCRIBED
-    sess.ended_at = datetime.now()
+    sess.ended_at = now_local()
     db.commit()
     db.refresh(sess)
 
@@ -422,7 +422,7 @@ def complete_session(
     if not sess.reference_code:
         sess.reference_code = _reference_code(db)
     if not sess.ended_at:
-        sess.ended_at = datetime.now()
+        sess.ended_at = now_local()
     sess.status = SessionStatus.COMPLETED
 
     db.add(

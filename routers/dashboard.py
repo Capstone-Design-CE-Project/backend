@@ -6,6 +6,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session as DBSession
 
 from core.deps import get_current_counselor
+from core.timeutil import now_local
 from database import get_db
 from models import (
     Appointment, AppointmentStatus, Counselor, CounselSession, Notification,
@@ -33,7 +34,7 @@ def dashboard(
     db: DBSession = Depends(get_db),
 ):
     """'오늘의 업무 현황' 카드 4개를 한 번에 내려준다."""
-    now = datetime.now()
+    now = now_local()
     today_start = datetime(now.year, now.month, now.day)
     today_end = today_start + timedelta(days=1)
 

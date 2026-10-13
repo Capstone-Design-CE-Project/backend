@@ -6,6 +6,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session as DBSession
 
 from core.deps import get_current_counselor, get_owned_client
+from core.phone import normalize_phone
 from core.security import generate_code, hash_password
 from database import get_db
 from models import Counselor, CounselSession, User
@@ -76,6 +77,7 @@ def create_client(
         age=payload.age,
         gender=payload.gender,
         phone=payload.phone,
+        phone_digits=normalize_phone(payload.phone),
         memo=payload.memo,
         cognitive_stage=payload.cognitive_stage,
         member_code=_unique_member_code(db),
@@ -123,6 +125,9 @@ def update_client(
 
     for key, value in data.items():
         setattr(client, key, value)
+
+    if "phone" in data:
+        client.phone_digits = normalize_phone(data["phone"])
 
     db.commit()
     db.refresh(client)

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session as DBSession
 
 from core.deps import get_current_counselor, get_owned_client
+from core.timeutil import now_local
 from database import get_db
 from models import Appointment, AppointmentStatus, Counselor
 from schemas import (
@@ -101,7 +102,7 @@ def upcoming(
     db: DBSession = Depends(get_db),
 ):
     """dashboard의 '다음 상담' 및 예정 면담 리스트."""
-    now = datetime.now()
+    now = now_local()
     rows = (
         db.query(Appointment)
         .filter(

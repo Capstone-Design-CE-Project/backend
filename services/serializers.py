@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session as DBSession
 
+from core.timeutil import now_local
 from models import Album, Appointment, CounselSession, QaLog, User
 from schemas import (
     AlbumCardOut, AlbumOut, AppointmentOut, ClientDetail, QaLogOut,
@@ -117,7 +118,7 @@ def next_appointment(db: DBSession, client_id: int) -> Optional[Appointment]:
         .filter(
             Appointment.client_id == client_id,
             Appointment.status == AppointmentStatus.SCHEDULED,
-            Appointment.scheduled_at >= datetime.now(),
+            Appointment.scheduled_at >= now_local(),
         )
         .order_by(Appointment.scheduled_at)
         .first()

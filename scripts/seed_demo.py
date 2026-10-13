@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from core.phone import normalize_phone                        # noqa: E402
 from core.security import generate_code, hash_password       # noqa: E402
 from database import Base, SessionLocal, engine, init_db     # noqa: E402
 from models import (                                          # noqa: E402
@@ -100,6 +101,7 @@ def seed() -> None:
                 age=info["age"],
                 gender=info["gender"],
                 phone=info["phone"],
+                phone_digits=normalize_phone(info["phone"]),
                 memo=info["memo"],
                 cognitive_stage=info["cognitive_stage"],
                 member_code=generate_code("#MEM"),
@@ -208,6 +210,7 @@ def seed() -> None:
         print("[SEED] 데모 데이터 생성 완료")
         print(f"       상담사 로그인 : counselor_lee / {COUNSELOR_PASSWORD}")
         print(f"       어르신 로그인 : {CLIENTS[1]['login_id']} / PIN {CLIENT_PIN}")
+        print(f"                      (전화번호 {CLIENTS[1]['phone']} 로도 로그인 가능)")
     finally:
         db.close()
 

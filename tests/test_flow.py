@@ -287,3 +287,87 @@ def test_client_cannot_see_incomplete_session(client, auth):
     # 완료 전 세션은 어르신에게 노출되지 않는다
     res = client.get(f"/me/sessions/{session_id}/summary", headers=headers)
     assert res.status_code == 403
+
+
+def test_phone_login_and_timezone(client, auth):
+    """프론트(client_login.dart / calendar)가 보내는 실제 형식 검증."""
+    from datetime import datetime, timedelta, timezone
+
+    # 상담사가 전화번호만 입력해 등록 (new_client_form.dart 와 동일)
+    res = client.post(
+        "/clients",
+        headers=auth,
+        json={"name": "김순자", "age": 80, "gender": "F", "phone": "010-9876-5432"},
+    )
+    assert res.status_code == 201
+    client_id = res.json()["id"]
+    assert res.json()["has_pin"] is False
+
+    # PIN 미설정 상태에서는 로그인 불가
+    res = client.post(
+        "/auth/client/login", json={"login_id": "01098765432", "pin": "246810"}
+    )
+    assert res.status_code == 401
+
+    # 상담사가 PIN 발급 (updateClient(pin:))
+    res = client.patch(f"/clients/{client_id}", headers=auth, json={"pin": "246810"})
+    assert res.status_code == 200
+    assert res.json()["has_pin"] is True
+
+    # 단말이 주는 어떤 표기로도 로그인된다
+    for login_id in ["010-9876-5432", "01098765432", "+82 10-9876-5432", "+821098765432"]:
+        res = client.post(
+            "/auth/client/login", json={"login_id": login_id, "pin": "246810"}
+        )
+        assert res.status_code == 200, f"{login_id} -> {res.status_code} {res.text}"
+        assert res.json()["role"] == "client"
+
+    # 잘못된 PIN은 거부
+    res = client.post(
+        "/auth/client/login", json={"login_id": "01098765432", "pin": "000000"}
+    )
+    assert res.status_code == 401
+
+    # ── 시간대: 앱은 toUtc().toIso8601String() 으로 보낸다 ────────
+    KST = timezone(timedelta(hours=9))
+    for hour in (8, 14, 23):
+        picked = datetime(2030, 11, 15, hour, 0, tzinfo=KST)
+        sent = picked.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+        res = client.post(
+            "/appointments",
+            headers=auth,
+            json={"client_id": client_id, "scheduled_at": sent},
+        )
+        assert res.status_code == 201, res.text
+        returned = res.json()["scheduled_at"]
+
+        # Dart DateTime.tryParse는 오프셋 없는 문자열을 로컬(KST)로 읽는다.
+        # 저장/응답이 KST 기준이므로 앱이 고른 시각과 그대로 일치해야 한다.
+        shown = datetime.fromisoformat(returned)
+        assert shown.tzinfo is None
+        assert (shown.hour, shown.minute) == (hour, 0), f"{returned} != {hour}:00"
+        assert shown.date() == picked.date()
+
+    # 캘린더 그룹핑도 앱 로컬 날짜와 같은 칸에 들어가야 한다 (오전 8시 포함)
+    res = client.get(
+        "/appointments/calendar", headers=auth, params={"year": 2030, "month": 11}
+    )
+    days = {d["date"]: d["count"] for d in res.json()["days"]}
+    assert days.get("2030-11-15") == 3, days
+    assert "2030-11-14" not in days
+
+
+def test_naive_datetime_still_accepted(client, auth):
+    """오프셋 없이 보내는 클라이언트도 그대로 동작해야 한다."""
+    client_id = client.post(
+        "/clients", headers=auth, json={"name": "이말순"}
+    ).json()["id"]
+
+    res = client.post(
+        "/appointments",
+        headers=auth,
+        json={"client_id": client_id, "scheduled_at": "2030-12-01T09:30:00"},
+    )
+    assert res.status_code == 201
+    assert res.json()["scheduled_at"].startswith("2030-12-01T09:30")

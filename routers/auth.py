@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from core.config import settings
 from core.deps import bearer_scheme, get_current_counselor
+from core.phone import normalize_phone
 from core.security import (
     create_access_token, decode_access_token, hash_password, verify_password,
 )
@@ -40,10 +41,40 @@ def counselor_login(payload: CounselorLoginRequest, db: DBSession = Depends(get_
 
 
 # ── 어르신 로그인 (ID + PIN) ──────────────────────────────────
+def _find_client(db: DBSession, login_id: str):
+    """아이디 또는 전화번호로 내담자 조회.
+
+    어르신 앱은 단말에서 읽은 전화번호를 login_id로 보내므로
+    '+82 10-...' / '010-...' / '01012345678' 표기 차이를 정규화해 함께 조회한다.
+    """
+    client = db.query(User).filter(User.login_id == login_id).first()
+    if client:
+        return client
+
+    digits = normalize_phone(login_id)
+    if not digits:
+        return None
+
+    matches = (
+        db.query(User)
+        .filter(User.phone_digits == digits, User.is_active.is_(True))
+        .all()
+    )
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        # 같은 번호로 여러 명이 등록된 경우 자동 선택하지 않는다.
+        raise HTTPException(
+            status_code=409,
+            detail="같은 전화번호로 등록된 내담자가 여러 명입니다. 담당 상담사에게 문의해 주세요.",
+        )
+    return None
+
+
 @router.post("/client/login", response_model=TokenResponse)
 def client_login(payload: ClientLoginRequest, db: DBSession = Depends(get_db)):
-    """client-login 화면: 'ID로 접속하기' + 비밀번호(PIN) 입력."""
-    client = db.query(User).filter(User.login_id == payload.login_id).first()
+    """client-login 화면: 전화번호(또는 아이디) + PIN 입력."""
+    client = _find_client(db, payload.login_id.strip())
     if not client or not verify_password(payload.pin, client.pin_hash):
         raise HTTPException(status_code=401, detail="아이디 또는 비밀번호(PIN)가 올바르지 않습니다.")
     if not client.is_active:

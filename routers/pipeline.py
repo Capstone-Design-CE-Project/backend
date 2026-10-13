@@ -12,12 +12,12 @@
 이 라우터는 토큰 없이 접근 가능하므로 운영 환경에서는
 LEGACY_PIPELINE_ENABLED=False 로 끄고 마이그레이션할 것.
 """
-from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session as DBSession
 
+from core.timeutil import now_local
 from database import get_db
 from models import Album, CounselSession, SessionStatus, User
 import promptmaker
@@ -51,7 +51,7 @@ def create_session(
         counselor_id=user.counselor_id,
         raw_filename=filename,
         status=SessionStatus.RECORDING,
-        started_at=datetime.now(),
+        started_at=now_local(),
     )
     db.add(sess)
     db.commit()
