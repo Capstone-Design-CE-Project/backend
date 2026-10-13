@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "./uploads"
     MEDIA_URL_PREFIX: str = "/media"
 
+    # ── 시간대 ────────────────────────────────────────────────
+    # DB에 저장하는 모든 시각의 기준 시간대. 서버 OS/DB 시간대와 무관하게 적용된다.
+    APP_TIMEZONE: str = "Asia/Seoul"
+    APP_TZ_FALLBACK_OFFSET_MINUTES: int = 540   # tzdata 없을 때 KST(+09:00)
+
     # ── 기타 ──────────────────────────────────────────────────
     CORS_ORIGINS: str = "*"
     # 외부 키가 없을 때 목(mock) 응답으로 대체할지 여부.
