@@ -8,7 +8,9 @@
 from datetime import datetime
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from core.timeutil import to_local_naive
 
 ORM = ConfigDict(from_attributes=True)
 
@@ -131,6 +133,12 @@ class AppointmentCreate(BaseModel):
     place: Optional[str] = Field(None, max_length=120)
     memo: Optional[str] = None
 
+    # 앱이 toUtc()로 보내는 '...Z'를 서비스 기준 시간대로 변환해 저장한다.
+    @field_validator("scheduled_at")
+    @classmethod
+    def _normalize_scheduled_at(cls, value: datetime) -> datetime:
+        return to_local_naive(value)
+
 
 class AppointmentUpdate(BaseModel):
     scheduled_at: Optional[datetime] = None
@@ -139,6 +147,11 @@ class AppointmentUpdate(BaseModel):
     place: Optional[str] = Field(None, max_length=120)
     memo: Optional[str] = None
     status: Optional[Literal["scheduled", "done", "canceled"]] = None
+
+    @field_validator("scheduled_at")
+    @classmethod
+    def _normalize_scheduled_at(cls, value: Optional[datetime]) -> Optional[datetime]:
+        return to_local_naive(value)
 
 
 class AppointmentOut(BaseModel):

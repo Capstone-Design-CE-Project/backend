@@ -34,6 +34,7 @@ CREATE TABLE users (
     age               INT,
     gender            CHAR(1)      CHECK (gender IN ('M', 'F')),
     phone             VARCHAR(20),
+    phone_digits      VARCHAR(20),             -- 숫자만 남긴 전화번호(앱 로그인 조회용)
     memo              TEXT,                    -- 상담 메모 및 특이사항
     cognitive_stage   VARCHAR(50),             -- '경도 인지 장애' 등
     member_code       VARCHAR(20)  UNIQUE,     -- 고유 번호 #MEM-7290
@@ -151,6 +152,7 @@ CREATE TABLE client_setting (
 
 -- ── 인덱스 ───────────────────────────────────────────────────
 CREATE INDEX idx_users_counselor    ON users(counselor_id);
+CREATE INDEX idx_users_phone_digits ON users(phone_digits);
 CREATE INDEX idx_session_user       ON session(user_id);
 CREATE INDEX idx_session_counselor  ON session(counselor_id, created_at DESC);
 CREATE INDEX idx_qa_session         ON qa_log(session_id, order_index);
@@ -179,6 +181,9 @@ COMMENT ON TABLE client_setting IS '어르신 앱 접근성 설정';
 -- ALTER TABLE users   ADD COLUMN age INT;
 -- ALTER TABLE users   ADD COLUMN gender CHAR(1);
 -- ALTER TABLE users   ADD COLUMN phone VARCHAR(20);
+-- ALTER TABLE users   ADD COLUMN phone_digits VARCHAR(20);
+-- CREATE INDEX idx_users_phone_digits ON users(phone_digits);
+-- UPDATE users SET phone_digits = regexp_replace(phone, '[^0-9]', '', 'g') WHERE phone IS NOT NULL;
 -- ALTER TABLE users   ADD COLUMN memo TEXT;
 -- ALTER TABLE users   ADD COLUMN cognitive_stage VARCHAR(50);
 -- ALTER TABLE users   ADD COLUMN member_code VARCHAR(20) UNIQUE;

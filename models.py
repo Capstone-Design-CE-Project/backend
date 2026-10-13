@@ -17,6 +17,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
+from core.timeutil import now_local
 from database import Base
 
 # SQLite에는 BIGINT AUTOINCREMENT가 없어 variant로 처리(로컬 폴백 대응)
@@ -59,7 +60,7 @@ class Counselor(Base):
     phone         = Column(String(20))
     profile_image_url = Column(Text)
     is_active     = Column(Boolean, nullable=False, default=True)
-    created_at    = Column(DateTime, server_default=func.now())
+    created_at    = Column(DateTime, default=now_local, server_default=func.now())
 
     clients       = relationship("User", back_populates="counselor")
     sessions      = relationship("CounselSession", back_populates="counselor")
@@ -80,6 +81,9 @@ class User(Base):
     age          = Column(Integer)
     gender       = Column(CHAR(1))          # 'M' / 'F'
     phone        = Column(String(20))
+    # 전화번호에서 숫자만 남긴 값. 어르신 앱이 단말 전화번호로 로그인하므로
+    # 표기(+82/하이픈) 차이를 흡수하려고 조회용으로 따로 둔다.
+    phone_digits = Column(String(20), index=True)
     memo         = Column(Text)             # 상담 메모 및 특이사항
     cognitive_stage = Column(String(50))    # 예: '경도 인지 장애'
     member_code  = Column(String(20), unique=True)   # 고유 번호 #MEM-7290
@@ -88,7 +92,7 @@ class User(Base):
     profile_image_url = Column(Text)
     last_visit_at = Column(DateTime)
     is_active    = Column(Boolean, nullable=False, default=True)
-    created_at   = Column(DateTime, server_default=func.now())
+    created_at   = Column(DateTime, default=now_local, server_default=func.now())
 
     counselor    = relationship("Counselor", back_populates="clients")
     sessions     = relationship(
@@ -122,7 +126,7 @@ class CounselSession(Base):
     reference_code = Column(String(30), unique=True)  # #CC-8821-XP
     started_at   = Column(DateTime)
     ended_at     = Column(DateTime)
-    created_at   = Column(DateTime, server_default=func.now())
+    created_at   = Column(DateTime, default=now_local, server_default=func.now())
 
     user      = relationship("User", back_populates="sessions")
     counselor = relationship("Counselor", back_populates="sessions")
@@ -220,7 +224,7 @@ class Album(Base):
     prompt      = Column(Text)
     scene       = Column(Text)               # 한국어 장면 설명
     is_selected = Column(Boolean, nullable=False, default=False)  # '이대로 저장'된 것
-    created_at  = Column(DateTime, server_default=func.now())
+    created_at  = Column(DateTime, default=now_local, server_default=func.now())
 
     session = relationship("CounselSession", back_populates="albums")
 
@@ -240,7 +244,7 @@ class Appointment(Base):
     place         = Column(String(120))      # '김철수 영정'
     memo          = Column(Text)
     status        = Column(String(20), nullable=False, default=AppointmentStatus.SCHEDULED)
-    created_at    = Column(DateTime, server_default=func.now())
+    created_at    = Column(DateTime, default=now_local, server_default=func.now())
 
     counselor = relationship("Counselor", back_populates="appointments")
     client    = relationship("User", back_populates="appointments")
@@ -258,7 +262,7 @@ class Notification(Base):
     body         = Column(Text)
     link_session_id = Column(FK, ForeignKey("session.id"))
     is_read      = Column(Boolean, nullable=False, default=False)
-    created_at   = Column(DateTime, server_default=func.now())
+    created_at   = Column(DateTime, default=now_local, server_default=func.now())
 
     counselor = relationship("Counselor", back_populates="notifications")
 
@@ -273,6 +277,6 @@ class ClientSetting(Base):
     high_contrast  = Column(Boolean, nullable=False, default=False)
     haptic_feedback = Column(Boolean, nullable=False, default=True)
     show_help_tips = Column(Boolean, nullable=False, default=True)
-    updated_at     = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    updated_at     = Column(DateTime, default=now_local, onupdate=now_local, server_default=func.now())
 
     user = relationship("User", back_populates="setting")
