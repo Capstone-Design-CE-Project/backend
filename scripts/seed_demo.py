@@ -22,7 +22,7 @@ from models import (                                          # noqa: E402
 )
 
 COUNSELOR_PASSWORD = "capstone1234"
-CLIENT_PIN = "1234"
+CLIENT_PIN = "123456"
 
 CLIENTS = [
     {
