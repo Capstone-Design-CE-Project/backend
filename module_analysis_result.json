@@ -1,0 +1,446 @@
+{
+  "nouns": [
+    {
+      "noun": "시골",
+      "adjectives": [],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    },
+    {
+      "noun": "논",
+      "adjectives": [
+        "많다"
+      ],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    },
+    {
+      "noun": "산",
+      "adjectives": [
+        "가깝다"
+      ],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    },
+    {
+      "noun": "나",
+      "adjectives": [
+        "힘들다"
+      ],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    },
+    {
+      "noun": "아랫목",
+      "adjectives": [
+        "따뜻하다"
+      ],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    },
+    {
+      "noun": "집",
+      "adjectives": [
+        "느다"
+      ],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    },
+    {
+      "noun": "개울",
+      "adjectives": [],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    },
+    {
+      "noun": "논길",
+      "adjectives": [],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    },
+    {
+      "noun": "친구",
+      "adjectives": [],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    },
+    {
+      "noun": "철수",
+      "adjectives": [],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    },
+    {
+      "noun": "국어 시간",
+      "adjectives": [
+        "좋다"
+      ],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    },
+    {
+      "noun": "구슬",
+      "adjectives": [],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    },
+    {
+      "noun": "정",
+      "adjectives": [
+        "많다"
+      ],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    },
+    {
+      "noun": "선생님",
+      "adjectives": [
+        "엄하다"
+      ],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    },
+    {
+      "noun": "다들",
+      "adjectives": [],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    },
+    {
+      "noun": "날",
+      "adjectives": [
+        "지다"
+      ],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    },
+    {
+      "noun": "생각",
+      "adjectives": [],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    },
+    {
+      "noun": "친구들",
+      "adjectives": [
+        "좋다"
+      ],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    },
+    {
+      "noun": "옛날",
+      "adjectives": [],
+      "positions": [],
+      "moderators": [],
+      "target": null,
+      "relative_clauses": []
+    }
+  ],
+  "relations": [
+    {
+      "subjects": [
+        "나"
+      ],
+      "verb": "자라다",
+      "object": null,
+      "direct_objects": [],
+      "indirect_objects": [],
+      "object_complements": [],
+      "context": [
+        "시골"
+      ],
+      "reason_clauses": [],
+      "polarity_bit": 1,
+      "negation": null,
+      "display": "(나 자라다 None) | context: ['시골']"
+    },
+    {
+      "subjects": [
+        "집"
+      ],
+      "verb": "북적북적하다",
+      "object": null,
+      "direct_objects": [],
+      "indirect_objects": [],
+      "object_complements": [],
+      "context": [],
+      "reason_clauses": [],
+      "polarity_bit": 1,
+      "negation": null,
+      "display": "(집 북적북적하다 None)"
+    },
+    {
+      "subjects": [
+        "나"
+      ],
+      "verb": "걷다",
+      "object": "학교",
+      "direct_objects": [
+        "학교"
+      ],
+      "indirect_objects": [],
+      "object_complements": [],
+      "context": [],
+      "reason_clauses": [],
+      "polarity_bit": 1,
+      "negation": null,
+      "display": "(나 걷다 학교)"
+    },
+    {
+      "subjects": [
+        "나"
+      ],
+      "verb": "다니다",
+      "object": "학교",
+      "direct_objects": [
+        "학교"
+      ],
+      "indirect_objects": [],
+      "object_complements": [],
+      "context": [],
+      "reason_clauses": [],
+      "polarity_bit": 1,
+      "negation": null,
+      "display": "(나 다니다 학교)"
+    },
+    {
+      "subjects": [
+        "나"
+      ],
+      "verb": "다니다",
+      "object": "학교",
+      "direct_objects": [
+        "학교"
+      ],
+      "indirect_objects": [],
+      "object_complements": [],
+      "context": [
+        "친구들"
+      ],
+      "reason_clauses": [],
+      "polarity_bit": 1,
+      "negation": null,
+      "display": "(나 다니다 학교) | context: ['친구들']"
+    },
+    {
+      "subjects": [
+        "나"
+      ],
+      "verb": "건너다",
+      "object": "개울",
+      "direct_objects": [
+        "개울"
+      ],
+      "indirect_objects": [],
+      "object_complements": [],
+      "context": [],
+      "reason_clauses": [],
+      "polarity_bit": 1,
+      "negation": null,
+      "display": "(나 건너다 개울)"
+    },
+    {
+      "subjects": [
+        "나"
+      ],
+      "verb": "걷다",
+      "object": "논길",
+      "direct_objects": [
+        "논길"
+      ],
+      "indirect_objects": [],
+      "object_complements": [],
+      "context": [],
+      "reason_clauses": [],
+      "polarity_bit": 1,
+      "negation": null,
+      "display": "(나 걷다 논길)"
+    },
+    {
+      "subjects": [
+        "나"
+      ],
+      "verb": "하다",
+      "object": "구슬치기",
+      "direct_objects": [
+        "구슬치기"
+      ],
+      "indirect_objects": [],
+      "object_complements": [],
+      "context": [],
+      "reason_clauses": [],
+      "polarity_bit": 1,
+      "negation": null,
+      "display": "(나 하다 구슬치기)"
+    },
+    {
+      "subjects": [
+        "나"
+      ],
+      "verb": "싸가다",
+      "object": "김치",
+      "direct_objects": [
+        "김치"
+      ],
+      "indirect_objects": [],
+      "object_complements": [],
+      "context": [
+        "보리밥"
+      ],
+      "reason_clauses": [],
+      "polarity_bit": 1,
+      "negation": null,
+      "display": "(나 싸가다 김치) | context: ['보리밥']"
+    },
+    {
+      "subjects": [
+        "나"
+      ],
+      "verb": "돕다",
+      "object": "집안일",
+      "direct_objects": [
+        "집안일"
+      ],
+      "indirect_objects": [],
+      "object_complements": [],
+      "context": [],
+      "reason_clauses": [],
+      "polarity_bit": 1,
+      "negation": null,
+      "display": "(나 돕다 집안일)"
+    },
+    {
+      "subjects": [
+        "나"
+      ],
+      "verb": "주워오다",
+      "object": "나무",
+      "direct_objects": [
+        "나무"
+      ],
+      "indirect_objects": [],
+      "object_complements": [],
+      "context": [],
+      "reason_clauses": [],
+      "polarity_bit": 1,
+      "negation": null,
+      "display": "(나 주워오다 나무)"
+    },
+    {
+      "subjects": [
+        "나"
+      ],
+      "verb": "돌보다",
+      "object": "소",
+      "direct_objects": [
+        "소"
+      ],
+      "indirect_objects": [],
+      "object_complements": [],
+      "context": [],
+      "reason_clauses": [],
+      "polarity_bit": 1,
+      "negation": null,
+      "display": "(나 돌보다 소)"
+    },
+    {
+      "subjects": [
+        "나"
+      ],
+      "verb": "좋아하다",
+      "object": "달리기",
+      "direct_objects": [
+        "달리기"
+      ],
+      "indirect_objects": [],
+      "object_complements": [],
+      "context": [],
+      "reason_clauses": [],
+      "polarity_bit": 1,
+      "negation": null,
+      "display": "(나 좋아하다 달리기)"
+    },
+    {
+      "subjects": [
+        "친구들"
+      ],
+      "verb": "생각나다",
+      "object": null,
+      "direct_objects": [],
+      "indirect_objects": [],
+      "object_complements": [],
+      "context": [],
+      "reason_clauses": [],
+      "polarity_bit": 1,
+      "negation": null,
+      "display": "(친구들 생각나다 None)"
+    },
+    {
+      "subjects": [
+        "생각"
+      ],
+      "verb": "나다",
+      "object": null,
+      "direct_objects": [],
+      "indirect_objects": [],
+      "object_complements": [],
+      "context": [],
+      "reason_clauses": [],
+      "polarity_bit": 1,
+      "negation": null,
+      "display": "(생각 나다 None)"
+    },
+    {
+      "subjects": [
+        "나"
+      ],
+      "verb": "이야기해주다",
+      "object": null,
+      "direct_objects": [],
+      "indirect_objects": [],
+      "object_complements": [],
+      "context": [],
+      "reason_clauses": [],
+      "polarity_bit": 1,
+      "negation": null,
+      "display": "(나 이야기해주다 None)"
+    }
+  ]
+}
