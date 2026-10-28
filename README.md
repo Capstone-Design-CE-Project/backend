@@ -96,7 +96,54 @@ backend/
 | 상담사 로그인 | POST | `/auth/counselor/login` |
 | 내담자 로그인 | POST | `/auth/client/login` (전화번호 가능, 3.8 참고) |
 | 공통 | GET | `/auth/me` |
-| — | POST | `/auth/counselor/register`, `/auth/counselor/password` |
+| 회원가입 | POST | `/auth/counselor/register` |
+| 중복 확인 | GET | `/auth/check?login_id=` 또는 `?phone=` |
+| 내 정보 수정 | PATCH | `/auth/counselor/me` |
+| 비밀번호 변경 | POST | `/auth/counselor/password` |
+
+#### 회원가입 (v3.3)
+
+`POST /auth/counselor/register`
+
+```json
+{
+  "login_id": "counselor_kim",
+  "password": "8자 이상",
+  "name": "김상담",
+  "phone": "010-1234-5678",
+  "email": "kim@example.com",
+  "organization": "행복요양병원"
+}
+```
+
+**가입 범위**는 `.env`의 `OPEN_COUNSELOR_SIGNUP`으로 정한다.
+
+| 값 | 동작 |
+|---|---|
+| `False` (기본) | 첫 계정만 무인증 생성, 이후에는 기존 상담사 토큰 필요 (초대 방식) |
+| `True` | 누구나 가입 가능 (공개 회원가입 페이지용) |
+
+공개 가입을 켜면 만들어진 계정이 내담자를 등록하고 상담 기록을 볼 수 있으므로,
+기관 인증·승인 절차를 별도로 두는 것을 권장한다.
+
+**중복 검사**는 아이디와 전화번호 양쪽에 적용된다.
+
+- 아이디: 상담사·내담자를 통틀어 중복 불가 (같은 아이디 공간을 쓴다)
+- 전화번호: 표기가 달라도 같은 번호면 중복 (`+82 10-1234-5678` = `01012345678`)
+  어르신이 전화번호로 로그인하므로, 중복을 허용하면 로그인이 409로 막힌다
+- 내담자 등록(`POST /clients`)·수정에도 같은 검사가 걸린다
+
+회원가입 화면에서는 제출 전에 `GET /auth/check`로 미리 확인할 수 있다(인증 불필요).
+
+```
+GET /auth/check?login_id=counselor_kim
+  → {"field":"login_id","value":"counselor_kim","available":false,
+     "reason":"이미 사용 중인 아이디입니다."}
+
+GET /auth/check?phone=%2B82%2010-1234-5678
+  → {"field":"phone","value":"01012345678","available":false,
+     "reason":"이미 등록된 전화번호입니다."}
+```
 
 ### 3.2 대시보드 / 알림
 
@@ -105,6 +152,35 @@ backend/
 ### 3.3 내담자 관리
 
 `GET|POST /clients` · `GET|PATCH|DELETE /clients/{id}` · `GET /clients/{id}/sessions`
+
+#### 내담자 추가 (상담사 로그인 후)
+
+```json
+POST /clients
+{
+  "name": "김순자",
+  "gender": "F",            // 'M' | 'F'
+  "age": 80,
+  "phone": "010-1234-5678",
+  "pin": "246810",          // 6자리 숫자
+  "memo": "고향 이야기에 반응이 좋음",
+  "cognitive_stage": "경도 인지 장애"
+}
+```
+
+`name` 외에는 모두 선택이며, 고유 번호(`#MEM-xxxx`)는 서버가 발급합니다.
+
+**검증 규칙** — 앱 로그인 화면과 맞춰 두어, 등록은 됐는데 어르신이
+로그인하지 못하는 계정이 생기지 않게 합니다.
+
+| 항목 | 규칙 | 위반 시 |
+|---|---|---|
+| `pin` | **6자리 숫자**(`^\d{6}$`). 앱이 6자리만 입력받는다 | 422 |
+| `pin` + 연락 수단 | `pin`을 주면 `phone` 또는 `login_id` 중 하나는 필요 | 422 |
+| `phone` | 상담사·내담자를 통틀어 중복 불가 (표기 차이 무시) | 409 |
+| `login_id` | 상담사·내담자를 통틀어 중복 불가 | 409 |
+
+`pin`을 주지 않으면 `AUTO_ISSUE_CLIENT_PIN` 설정에 따라 기본 PIN이 발급됩니다(3.8 참고).
 
 ### 3.4 상담 일정
 

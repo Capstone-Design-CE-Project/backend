@@ -21,6 +21,8 @@ CREATE TABLE counselor (
     name              VARCHAR(50)  NOT NULL,
     email             VARCHAR(120),
     phone             VARCHAR(20),
+    phone_digits      VARCHAR(20),             -- 숫자만 남긴 전화번호(중복 검사용)
+    organization      VARCHAR(100),            -- 소속 기관
     profile_image_url TEXT,
     is_active         BOOLEAN      NOT NULL DEFAULT TRUE,
     created_at        TIMESTAMP    NOT NULL DEFAULT NOW()
@@ -155,6 +157,7 @@ CREATE TABLE client_setting (
 -- ── 인덱스 ───────────────────────────────────────────────────
 CREATE INDEX idx_users_counselor    ON users(counselor_id);
 CREATE INDEX idx_users_phone_digits ON users(phone_digits);
+CREATE INDEX idx_counselor_phone_digits ON counselor(phone_digits);
 CREATE INDEX idx_session_user       ON session(user_id);
 CREATE INDEX idx_session_counselor  ON session(counselor_id, created_at DESC);
 CREATE INDEX idx_qa_session         ON qa_log(session_id, order_index);
@@ -167,6 +170,8 @@ CREATE INDEX idx_notification_read  ON notification(counselor_id, is_read);
 
 -- ── 코멘트 ───────────────────────────────────────────────────
 COMMENT ON TABLE counselor      IS '상담사 계정';
+COMMENT ON COLUMN counselor.organization IS '소속 기관 (병원·센터명)';
+COMMENT ON COLUMN counselor.phone_digits IS '전화번호 중복 검사용 정규화 값';
 COMMENT ON TABLE users          IS '내담자(어르신)';
 COMMENT ON TABLE session        IS '상담 세션 - 녹음 1회 단위';
 COMMENT ON TABLE qa_log         IS '화자 분리된 Q&A 원문';
@@ -205,6 +210,20 @@ COMMENT ON TABLE client_setting IS '어르신 앱 접근성 설정';
 -- v3.2 (분석 엔진 교체)
 -- ALTER TABLE session ADD COLUMN analysis_json TEXT;
 -- ALTER TABLE verb    ADD COLUMN polarity_bit INT NOT NULL DEFAULT 1;
+
+-- v3.3 (상담사 소속 기관 / 전화번호 중복 검사)
+-- ALTER TABLE counselor ADD COLUMN organization VARCHAR(100);
+-- ALTER TABLE counselor ADD COLUMN phone_digits VARCHAR(20);
+-- CREATE INDEX idx_counselor_phone_digits ON counselor(phone_digits);
+-- UPDATE counselor SET phone_digits = regexp_replace(phone, '[^0-9]', '', 'g')
+--   WHERE phone IS NOT NULL;
+--
+-- 기존 데이터에 전화번호가 중복돼 있으면 먼저 확인해 정리한다.
+--   SELECT phone_digits, COUNT(*) FROM (
+--     SELECT phone_digits FROM counselor WHERE phone_digits IS NOT NULL
+--     UNION ALL
+--     SELECT phone_digits FROM users     WHERE phone_digits IS NOT NULL
+--   ) t GROUP BY phone_digits HAVING COUNT(*) > 1;
 -- ALTER TABLE session ADD COLUMN reference_code VARCHAR(30) UNIQUE;
 -- ALTER TABLE session ADD COLUMN started_at TIMESTAMP;
 -- ALTER TABLE session ADD COLUMN ended_at TIMESTAMP;

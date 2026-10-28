@@ -20,6 +20,30 @@ from services import serializers
 router = APIRouter(prefix="/clients", tags=["clients"])
 
 
+def _check_phone_available(db: DBSession, phone: Optional[str], exclude_id=None) -> Optional[str]:
+    """전화번호 중복 검사 후 정규화된 값을 반환.
+
+    어르신 앱이 전화번호로 로그인하므로 중복이 있으면 로그인이 409로 막힌다.
+    등록 시점에 걸러 그런 상태가 생기지 않게 한다.
+    """
+    if not phone:
+        return None
+
+    digits = normalize_phone(phone)
+    if not digits:
+        raise HTTPException(status_code=400, detail="전화번호 형식이 올바르지 않습니다.")
+
+    taken = db.query(User).filter(User.phone_digits == digits)
+    if exclude_id is not None:
+        taken = taken.filter(User.id != exclude_id)
+    if taken.first():
+        raise HTTPException(status_code=409, detail="이미 등록된 전화번호입니다.")
+    if db.query(Counselor).filter(Counselor.phone_digits == digits).first():
+        raise HTTPException(status_code=409, detail="상담사 계정이 쓰는 전화번호입니다.")
+
+    return digits
+
+
 def _unique_member_code(db: DBSession) -> str:
     for _ in range(10):
         code = generate_code("#MEM")
@@ -89,7 +113,7 @@ def create_client(
         age=payload.age,
         gender=payload.gender,
         phone=payload.phone,
-        phone_digits=normalize_phone(payload.phone),
+        phone_digits=_check_phone_available(db, payload.phone),
         memo=payload.memo,
         cognitive_stage=payload.cognitive_stage,
         member_code=_unique_member_code(db),
@@ -139,7 +163,9 @@ def update_client(
         setattr(client, key, value)
 
     if "phone" in data:
-        client.phone_digits = normalize_phone(data["phone"])
+        client.phone_digits = _check_phone_available(
+            db, data["phone"], exclude_id=client.id
+        )
 
     db.commit()
     db.refresh(client)

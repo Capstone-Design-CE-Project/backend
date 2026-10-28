@@ -8,7 +8,7 @@
 from datetime import datetime
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from core.timeutil import to_local_naive
 
@@ -39,11 +39,31 @@ class TokenResponse(BaseModel):
 
 
 class CounselorCreate(BaseModel):
+    """상담사 회원가입."""
     login_id: str = Field(..., max_length=50)
     password: str = Field(..., min_length=8)
     name: str = Field(..., max_length=50)
     email: Optional[str] = None
     phone: Optional[str] = Field(None, max_length=20)
+    organization: Optional[str] = Field(
+        None, max_length=100, description="소속 기관", examples=["행복요양병원"]
+    )
+
+
+class CounselorUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=50)
+    email: Optional[str] = None
+    phone: Optional[str] = Field(None, max_length=20)
+    organization: Optional[str] = Field(None, max_length=100)
+    profile_image_url: Optional[str] = None
+
+
+class AvailabilityResponse(BaseModel):
+    """회원가입 화면의 중복 확인 결과."""
+    field: str                 # 'login_id' | 'phone'
+    value: str
+    available: bool
+    reason: Optional[str] = None
 
 
 class CounselorOut(BaseModel):
@@ -53,6 +73,7 @@ class CounselorOut(BaseModel):
     name: str
     email: Optional[str] = None
     phone: Optional[str] = None
+    organization: Optional[str] = None
     profile_image_url: Optional[str] = None
     created_at: Optional[datetime] = None
 
@@ -74,8 +95,21 @@ class ClientCreate(BaseModel):
     memo: Optional[str] = None
     cognitive_stage: Optional[str] = Field(None, max_length=50)
     login_id: Optional[str] = Field(None, max_length=50)
-    pin: Optional[str] = Field(None, min_length=4, max_length=6)
+    # 어르신 앱이 6자리 숫자만 입력받는다(client_login.dart 의 ^\d{6}$).
+    # 서버가 더 느슨하면 "등록은 됐는데 앱에서 로그인이 안 되는" 계정이 생긴다.
+    pin: Optional[str] = Field(
+        None, pattern=r"^\d{6}$", description="6자리 숫자", examples=["123456"]
+    )
     profile_image_url: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _check_login_method(self):
+        """PIN 을 정했으면 로그인할 수단(전화번호 또는 아이디)이 있어야 한다."""
+        if self.pin and not self.phone and not self.login_id:
+            raise ValueError(
+                "PIN을 설정하려면 전화번호 또는 로그인 아이디가 필요합니다."
+            )
+        return self
 
 
 class ClientUpdate(BaseModel):
@@ -86,7 +120,11 @@ class ClientUpdate(BaseModel):
     memo: Optional[str] = None
     cognitive_stage: Optional[str] = Field(None, max_length=50)
     login_id: Optional[str] = Field(None, max_length=50)
-    pin: Optional[str] = Field(None, min_length=4, max_length=6)
+    # 어르신 앱이 6자리 숫자만 입력받는다(client_login.dart 의 ^\d{6}$).
+    # 서버가 더 느슨하면 "등록은 됐는데 앱에서 로그인이 안 되는" 계정이 생긴다.
+    pin: Optional[str] = Field(
+        None, pattern=r"^\d{6}$", description="6자리 숫자", examples=["123456"]
+    )
     profile_image_url: Optional[str] = None
     is_active: Optional[bool] = None
 

@@ -58,6 +58,9 @@ class Counselor(Base):
     name          = Column(String(50), nullable=False)               # 이전수
     email         = Column(String(120))
     phone         = Column(String(20))
+    # 표기(+82/하이픈) 차이를 흡수한 중복 검사용 값
+    phone_digits  = Column(String(20), index=True)
+    organization  = Column(String(100))              # 소속 기관
     profile_image_url = Column(Text)
     is_active     = Column(Boolean, nullable=False, default=True)
     created_at    = Column(DateTime, default=now_local, server_default=func.now())

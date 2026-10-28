@@ -89,6 +89,9 @@ def seed() -> None:
             password_hash=hash_password(COUNSELOR_PASSWORD),
             name="이전수",
             email="counselor.lee@example.com",
+            phone="010-9000-1000",
+            phone_digits=normalize_phone("010-9000-1000"),
+            organization="행복요양병원",
         )
         db.add(counselor)
         db.flush()

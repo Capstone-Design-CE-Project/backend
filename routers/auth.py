@@ -1,5 +1,7 @@
 """인증 - splash / counselor-login / client-login 화면."""
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session as DBSession
 
 from core.config import settings
@@ -11,8 +13,9 @@ from core.security import (
 from database import get_db
 from models import Counselor, User
 from schemas import (
-    ChangePasswordRequest, ClientLoginRequest, CounselorCreate,
-    CounselorLoginRequest, CounselorOut, MessageResponse, TokenResponse,
+    AvailabilityResponse, ChangePasswordRequest, ClientLoginRequest,
+    CounselorCreate, CounselorLoginRequest, CounselorOut, CounselorUpdate,
+    MessageResponse, TokenResponse,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -41,6 +44,31 @@ def counselor_login(payload: CounselorLoginRequest, db: DBSession = Depends(get_
 
 
 # ── 어르신 로그인 (ID + PIN) ──────────────────────────────────
+def _login_id_taken(db: DBSession, login_id: str) -> bool:
+    """상담사·내담자가 같은 아이디 공간을 쓰므로 양쪽 모두 확인한다."""
+    if db.query(Counselor).filter(Counselor.login_id == login_id).first():
+        return True
+    return db.query(User).filter(User.login_id == login_id).first() is not None
+
+
+def _phone_owner(db: DBSession, phone: str):
+    """같은 전화번호를 이미 쓰는 계정을 반환 (없으면 None).
+
+    어르신 앱이 전화번호로 로그인하므로 상담사·내담자를 통틀어 중복을 막는다.
+    표기가 달라도('+82 10-...', '010-...') 같은 번호로 취급한다.
+    """
+    digits = normalize_phone(phone)
+    if not digits:
+        return None
+
+    counselor = (
+        db.query(Counselor).filter(Counselor.phone_digits == digits).first()
+    )
+    if counselor:
+        return counselor
+    return db.query(User).filter(User.phone_digits == digits).first()
+
+
 def _find_client(db: DBSession, login_id: str):
     """아이디 또는 전화번호로 내담자 조회.
 
@@ -111,6 +139,8 @@ def me(cred=Depends(bearer_scheme), db: DBSession = Depends(get_db)):
             "login_id": row.login_id,
             "name": row.name,
             "email": row.email,
+            "phone": row.phone,
+            "organization": row.organization,
             "profile_image_url": row.profile_image_url,
         }
 
@@ -137,10 +167,18 @@ def register_counselor(
 ):
     """상담사 계정 생성.
 
-    첫 계정(부트스트랩)은 토큰 없이 만들 수 있고,
-    그 이후부터는 기존 상담사 토큰이 있어야 한다.
+    기본값(OPEN_COUNSELOR_SIGNUP=False)에서는 첫 계정만 토큰 없이 만들 수 있고,
+    그 이후부터는 기존 상담사 토큰이 있어야 한다(초대 방식).
+
+    공개 회원가입 페이지를 쓰려면 .env 에 OPEN_COUNSELOR_SIGNUP=True 를 넣는다.
+    이 경우 누구나 상담사 계정을 만들 수 있고, 그 계정은 내담자를 등록하고
+    상담 기록을 볼 수 있으므로 기관 인증 절차를 따로 두는 것이 좋다.
     """
-    exists_any = db.query(Counselor).first() is not None
+    # OPEN_COUNSELOR_SIGNUP=True 면 공개 회원가입, False 면 첫 계정만 무인증
+    exists_any = (
+        not settings.OPEN_COUNSELOR_SIGNUP
+        and db.query(Counselor).first() is not None
+    )
     if exists_any:
         payload_token = decode_access_token(cred.credentials) if cred else None
         if not payload_token or payload_token.get("role") != "counselor":
@@ -148,8 +186,16 @@ def register_counselor(
                 status_code=403, detail="상담사 계정 생성은 기존 상담사만 가능합니다."
             )
 
-    if db.query(Counselor).filter(Counselor.login_id == payload.login_id).first():
+    if _login_id_taken(db, payload.login_id):
         raise HTTPException(status_code=409, detail="이미 사용 중인 아이디입니다.")
+
+    phone_digits = None
+    if payload.phone:
+        phone_digits = normalize_phone(payload.phone)
+        if not phone_digits:
+            raise HTTPException(status_code=400, detail="전화번호 형식이 올바르지 않습니다.")
+        if _phone_owner(db, payload.phone):
+            raise HTTPException(status_code=409, detail="이미 등록된 전화번호입니다.")
 
     counselor = Counselor(
         login_id=payload.login_id,
@@ -157,8 +203,87 @@ def register_counselor(
         name=payload.name,
         email=payload.email,
         phone=payload.phone,
+        phone_digits=phone_digits,
+        organization=payload.organization,
     )
     db.add(counselor)
+    db.commit()
+    db.refresh(counselor)
+    return counselor
+
+
+@router.get("/check", response_model=AvailabilityResponse)
+def check_availability(
+    login_id: Optional[str] = Query(None, description="사용 가능 여부를 확인할 아이디"),
+    phone: Optional[str] = Query(None, description="사용 가능 여부를 확인할 전화번호"),
+    db: DBSession = Depends(get_db),
+):
+    """회원가입 화면의 '중복 확인'.
+
+    login_id 또는 phone 중 하나를 넘긴다. 가입 전에 호출하는 화면이라
+    인증은 필요 없고, 존재 여부(true/false)만 돌려준다.
+    """
+    if bool(login_id) == bool(phone):
+        raise HTTPException(
+            status_code=400, detail="login_id 또는 phone 중 하나만 넘겨 주세요."
+        )
+
+    if login_id:
+        value = login_id.strip()
+        if not value:
+            raise HTTPException(status_code=400, detail="아이디를 입력해 주세요.")
+        taken = _login_id_taken(db, value)
+        return AvailabilityResponse(
+            field="login_id",
+            value=value,
+            available=not taken,
+            reason="이미 사용 중인 아이디입니다." if taken else None,
+        )
+
+    digits = normalize_phone(phone)
+    if not digits:
+        return AvailabilityResponse(
+            field="phone",
+            value=phone.strip(),
+            available=False,
+            reason="전화번호 형식이 올바르지 않습니다.",
+        )
+    taken = _phone_owner(db, phone) is not None
+    return AvailabilityResponse(
+        field="phone",
+        value=digits,
+        available=not taken,
+        reason="이미 등록된 전화번호입니다." if taken else None,
+    )
+
+
+@router.patch("/counselor/me", response_model=CounselorOut)
+def update_my_profile(
+    payload: CounselorUpdate,
+    counselor: Counselor = Depends(get_current_counselor),
+    db: DBSession = Depends(get_db),
+):
+    """상담사 본인 정보 수정 (소속 기관·연락처 등)."""
+    data = payload.model_dump(exclude_unset=True)
+
+    if "phone" in data:
+        phone = data["phone"]
+        if phone:
+            digits = normalize_phone(phone)
+            if not digits:
+                raise HTTPException(status_code=400, detail="전화번호 형식이 올바르지 않습니다.")
+            owner = _phone_owner(db, phone)
+            if owner is not None and not (
+                isinstance(owner, Counselor) and owner.id == counselor.id
+            ):
+                raise HTTPException(status_code=409, detail="이미 등록된 전화번호입니다.")
+            counselor.phone_digits = digits
+        else:
+            counselor.phone_digits = None
+
+    for key, value in data.items():
+        setattr(counselor, key, value)
+
     db.commit()
     db.refresh(counselor)
     return counselor

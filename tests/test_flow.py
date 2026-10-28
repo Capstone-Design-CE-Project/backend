@@ -6,7 +6,7 @@
 """
 import io
 
-CLIENT_PIN = "4821"
+CLIENT_PIN = "482100"   # 앱이 6자리만 받는다
 
 
 def test_health(client):
@@ -272,7 +272,7 @@ def test_client_cannot_see_incomplete_session(client, auth):
         "/clients",
         headers=auth,
         json={"name": "박명수", "age": 65, "gender": "M",
-              "login_id": "park_test", "pin": "1111"},
+              "login_id": "park_test", "pin": "111111"},
     )
     client_id = res.json()["id"]
     session_id = client.post(
@@ -280,7 +280,7 @@ def test_client_cannot_see_incomplete_session(client, auth):
     ).json()["id"]
 
     token = client.post(
-        "/auth/client/login", json={"login_id": "park_test", "pin": "1111"}
+        "/auth/client/login", json={"login_id": "park_test", "pin": "111111"}
     ).json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
@@ -423,5 +423,229 @@ def test_explicit_pin_overrides_default(client, auth):
         "/auth/client/login", json={"login_id": "01044445555", "pin": "778899"}
     ).status_code == 200
     assert client.post(
-        "/auth/client/login", json={"login_id": "01044445555", "pin": "1234"}  # 기본 PIN(123456) 아님
+        "/auth/client/login", json={"login_id": "01044445555", "pin": "123456"}  # 기본 PIN, 명시 PIN 아님
     ).status_code == 401
+
+
+# ══════════════════════════════════════════════════════════════
+# 회원가입 - 중복 검사 / 소속 기관
+# ══════════════════════════════════════════════════════════════
+def test_counselor_signup_with_organization(client, auth):
+    res = client.post(
+        "/auth/counselor/register",
+        headers=auth,
+        json={
+            "login_id": "counselor_park",
+            "password": "test-password-1234",
+            "name": "박상담",
+            "phone": "010-7000-8000",
+            "organization": "행복요양병원",
+        },
+    )
+    assert res.status_code == 201, res.text
+    assert res.json()["organization"] == "행복요양병원"
+
+
+def test_duplicate_login_id_is_rejected(client, auth):
+    payload = {
+        "login_id": "counselor_dup", "password": "test-password-1234",
+        "name": "중복테스트",
+    }
+    assert client.post(
+        "/auth/counselor/register", headers=auth, json=payload
+    ).status_code == 201
+    res = client.post("/auth/counselor/register", headers=auth, json=payload)
+    assert res.status_code == 409
+    assert "아이디" in res.json()["detail"]
+
+
+def test_duplicate_phone_is_rejected_across_formats(client, auth):
+    """표기가 달라도 같은 번호면 중복으로 본다."""
+    assert client.post(
+        "/auth/counselor/register", headers=auth,
+        json={"login_id": "phone_owner", "password": "test-password-1234",
+              "name": "번호주인", "phone": "010-5000-6000"},
+    ).status_code == 201
+
+    for phone in ["010-5000-6000", "01050006000", "+82 10-5000-6000"]:
+        res = client.post(
+            "/auth/counselor/register", headers=auth,
+            json={"login_id": f"other_{phone[-4:]}_{len(phone)}",
+                  "password": "test-password-1234", "name": "다른사람",
+                  "phone": phone},
+        )
+        assert res.status_code == 409, f"{phone} -> {res.status_code}"
+        assert "전화번호" in res.json()["detail"]
+
+
+def test_client_phone_cannot_duplicate_counselor_phone(client, auth):
+    """어르신은 전화번호로 로그인하므로 상담사 번호와도 겹치면 안 된다."""
+    client.post(
+        "/auth/counselor/register", headers=auth,
+        json={"login_id": "org_counselor", "password": "test-password-1234",
+              "name": "기관상담사", "phone": "010-1212-3434"},
+    )
+    res = client.post(
+        "/clients", headers=auth, json={"name": "겹치는분", "phone": "01012123434"}
+    )
+    assert res.status_code == 409
+
+
+def test_duplicate_client_phone_is_rejected(client, auth):
+    assert client.post(
+        "/clients", headers=auth, json={"name": "첫번째", "phone": "010-7777-8888"}
+    ).status_code == 201
+    res = client.post(
+        "/clients", headers=auth, json={"name": "두번째", "phone": "+82 10-7777-8888"}
+    )
+    assert res.status_code == 409
+
+
+def test_availability_check_endpoint(client, auth):
+    """회원가입 화면의 중복 확인 (인증 불필요)."""
+    client.post(
+        "/auth/counselor/register", headers=auth,
+        json={"login_id": "taken_id", "password": "test-password-1234",
+              "name": "선점", "phone": "010-3131-4141"},
+    )
+
+    res = client.get("/auth/check", params={"login_id": "taken_id"})
+    assert res.status_code == 200
+    assert res.json()["available"] is False
+
+    res = client.get("/auth/check", params={"login_id": "brand_new_id"})
+    assert res.json()["available"] is True
+
+    # 표기가 달라도 선점된 번호로 인식
+    res = client.get("/auth/check", params={"phone": "+82 10-3131-4141"})
+    assert res.json()["available"] is False
+    assert res.json()["value"] == "01031314141"
+
+    res = client.get("/auth/check", params={"phone": "010-0000-0001"})
+    assert res.json()["available"] is True
+
+    # 형식 오류
+    assert client.get("/auth/check", params={"phone": "abc"}).json()["available"] is False
+    # 둘 다 주거나 둘 다 안 주면 400
+    assert client.get("/auth/check").status_code == 400
+    assert client.get(
+        "/auth/check", params={"login_id": "a", "phone": "010-1111-2222"}
+    ).status_code == 400
+
+
+def test_counselor_can_update_own_profile(client, auth):
+    res = client.patch(
+        "/auth/counselor/me", headers=auth,
+        json={"organization": "서울시니어케어센터", "phone": "010-2020-3030"},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["organization"] == "서울시니어케어센터"
+
+    # 같은 번호를 본인이 다시 저장하는 것은 허용
+    assert client.patch(
+        "/auth/counselor/me", headers=auth, json={"phone": "01020203030"}
+    ).status_code == 200
+
+
+def test_open_signup_flag_controls_public_registration(client):
+    """공개 회원가입 플래그가 가입 가능 여부를 바꾼다."""
+    from core.config import settings
+
+    body = {
+        "login_id": "public_signup", "password": "test-password-1234",
+        "name": "공개가입", "organization": "열린센터",
+    }
+
+    # 기본값: 이미 상담사가 있으면 토큰 없이는 막힌다
+    assert settings.OPEN_COUNSELOR_SIGNUP is False
+    assert client.post("/auth/counselor/register", json=body).status_code == 403
+
+    original = settings.OPEN_COUNSELOR_SIGNUP
+    settings.OPEN_COUNSELOR_SIGNUP = True
+    try:
+        res = client.post("/auth/counselor/register", json=body)
+        assert res.status_code == 201, res.text
+        assert res.json()["organization"] == "열린센터"
+    finally:
+        settings.OPEN_COUNSELOR_SIGNUP = original
+
+
+# ══════════════════════════════════════════════════════════════
+# 내담자 추가 - 입력 검증 (앱 로그인 화면과 규칙을 맞춘다)
+# ══════════════════════════════════════════════════════════════
+def test_client_pin_must_be_six_digits(client, auth):
+    """앱(client_login.dart)이 6자리 숫자만 받으므로 서버도 같게 막는다.
+
+    서버가 더 느슨하면 "등록은 됐는데 어르신이 로그인 화면에서
+    입력조차 못 하는" 계정이 조용히 생긴다.
+    """
+    base = {"name": "검증대상", "gender": "F", "phone": "010-8800-0001"}
+
+    for bad_pin in ["1234", "12345", "abcdef", "12 345", "12345a"]:
+        res = client.post("/clients", headers=auth, json={**base, "pin": bad_pin})
+        assert res.status_code == 422, f"{bad_pin} -> {res.status_code}"
+
+    res = client.post("/clients", headers=auth, json={**base, "pin": "123456"})
+    assert res.status_code == 201
+
+
+def test_client_pin_requires_a_login_method(client, auth):
+    """PIN 만 있고 전화번호·아이디가 없으면 로그인할 방법이 없다."""
+    res = client.post(
+        "/clients", headers=auth, json={"name": "연락처없음", "pin": "123456"}
+    )
+    assert res.status_code == 422
+    assert "전화번호" in res.text
+
+    # 전화번호가 있으면 통과
+    assert client.post(
+        "/clients", headers=auth,
+        json={"name": "연락처있음", "phone": "010-8800-0002", "pin": "123456"},
+    ).status_code == 201
+
+    # 아이디가 있어도 통과
+    assert client.post(
+        "/clients", headers=auth,
+        json={"name": "아이디있음", "login_id": "id_only", "pin": "123456"},
+    ).status_code == 201
+
+
+def test_client_update_pin_also_validated(client, auth):
+    client_id = client.post(
+        "/clients", headers=auth, json={"name": "수정대상", "phone": "010-8800-0003"}
+    ).json()["id"]
+
+    assert client.patch(
+        f"/clients/{client_id}", headers=auth, json={"pin": "1234"}
+    ).status_code == 422
+    assert client.patch(
+        f"/clients/{client_id}", headers=auth, json={"pin": "654321"}
+    ).status_code == 200
+
+
+def test_new_client_form_fields_round_trip(client, auth):
+    """내담자 추가 화면 항목(이름·성별·전화번호·PIN·메모)이 그대로 저장된다."""
+    res = client.post(
+        "/clients",
+        headers=auth,
+        json={
+            "name": "김순자", "gender": "F", "age": 80,
+            "phone": "010-8800-0004", "pin": "246810",
+            "memo": "고향 이야기에 반응이 좋음. 큰 소리에 놀람.",
+            "cognitive_stage": "경도 인지 장애",
+        },
+    )
+    assert res.status_code == 201, res.text
+    created = res.json()
+    assert created["gender"] == "F"
+    assert created["memo"].startswith("고향 이야기")
+    assert created["cognitive_stage"] == "경도 인지 장애"
+    assert created["member_code"].startswith("#MEM-")
+    assert created["has_pin"] is True
+
+    # 등록 직후 어르신이 전화번호 + PIN 으로 로그인된다
+    res = client.post(
+        "/auth/client/login", json={"login_id": "010-8800-0004", "pin": "246810"}
+    )
+    assert res.status_code == 200
+    assert res.json()["name"] == "김순자"
