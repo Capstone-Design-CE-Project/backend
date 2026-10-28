@@ -61,6 +61,7 @@ CREATE TABLE session (
     transcript       TEXT,                     -- STT 전문
     summary          TEXT,                     -- AI 요약(상담사 수정 가능)
     keywords         TEXT,                     -- 핵심 기억 키워드(콤마 구분)
+    analysis_json    TEXT,                     -- 형태소/관계 분석 원본(JSON)
     reference_code   VARCHAR(30)  UNIQUE,      -- 참조 번호 #CC-8821-XP
     started_at       TIMESTAMP,
     ended_at         TIMESTAMP,
@@ -95,9 +96,10 @@ CREATE TABLE adjective (
 );
 
 CREATE TABLE verb (
-    id      BIGSERIAL    PRIMARY KEY,
-    noun_id BIGINT       NOT NULL REFERENCES noun(id) ON DELETE CASCADE,
-    value   VARCHAR(100) NOT NULL
+    id           BIGSERIAL    PRIMARY KEY,
+    noun_id      BIGINT       NOT NULL REFERENCES noun(id) ON DELETE CASCADE,
+    value        VARCHAR(100) NOT NULL,
+    polarity_bit INT          NOT NULL DEFAULT 1   -- 1=긍정, 0=부정
 );
 
 -- ── 회상 이미지 앨범 ─────────────────────────────────────────
@@ -200,6 +202,9 @@ COMMENT ON TABLE client_setting IS '어르신 앱 접근성 설정';
 -- ALTER TABLE session ADD COLUMN transcript TEXT;
 -- ALTER TABLE session ADD COLUMN summary TEXT;
 -- ALTER TABLE session ADD COLUMN keywords TEXT;
+-- v3.2 (분석 엔진 교체)
+-- ALTER TABLE session ADD COLUMN analysis_json TEXT;
+-- ALTER TABLE verb    ADD COLUMN polarity_bit INT NOT NULL DEFAULT 1;
 -- ALTER TABLE session ADD COLUMN reference_code VARCHAR(30) UNIQUE;
 -- ALTER TABLE session ADD COLUMN started_at TIMESTAMP;
 -- ALTER TABLE session ADD COLUMN ended_at TIMESTAMP;

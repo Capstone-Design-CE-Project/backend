@@ -9,6 +9,7 @@
   session-complete    → POST /sessions/{id}/complete
   session-detail      → GET  /sessions/{id}
 """
+import json
 import secrets
 from typing import List, Optional
 
@@ -23,7 +24,7 @@ from core.timeutil import now_local
 from database import get_db
 from models import (
     Album, Appointment, AppointmentStatus, Counselor, CounselSession,
-    Notification, SessionStatus,
+    Notification, QaLog, SessionStatus,
 )
 import promptmaker
 from schemas import (
@@ -35,6 +36,28 @@ from services import image_service, morph_service, serializers, stt_service
 from services import summary_service
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+def _run_analysis(session_id: int, sess, db) -> int:
+    """세션의 대화 전체를 한 번에 분석해 저장하고 명사 수를 반환.
+
+    새 엔진은 질문과 답변을 이어서 해석하므로 발화를 하나씩 넘기지 않고
+    qa_log 전체를 넘긴다. 분석기가 없으면 조용히 0을 반환한다.
+    """
+    turns = [
+        {"type": row.type, "text": row.text}
+        for row in db.query(QaLog)
+        .filter(QaLog.session_id == session_id)
+        .order_by(QaLog.order_index)
+        .all()
+    ]
+    result = morph_service.analyze_conversation(turns)
+    if not result.get("nouns") and not result.get("relations"):
+        return 0
+
+    sess.analysis_json = json.dumps(result, ensure_ascii=False)
+    db.commit()
+    return promptmaker.save_analysis_to_db(session_id, result, db)
+
 
 
 def _reference_code(db: DBSession) -> str:
@@ -183,16 +206,13 @@ def upload_recording(
         # 화자 분리 실패 시 전문을 어르신 발화로 저장 (fallback)
         promptmaker.save_stt_result(session_id, full_text, db, qa_type="A")
 
-    # 어르신 발화만 형태소 분석 → noun/adjective/verb 저장
-    morph_saved = 0
-    for utterance in stt_service.split_speakers(segments).get("client", []) or [full_text]:
-        for analyzed in morph_service.analyze(utterance):
-            morph_saved += promptmaker.save_morphs_to_db(session_id, analyzed, db)
-
     sess.transcript = full_text
     sess.status = SessionStatus.TRANSCRIBED
     sess.ended_at = now_local()
     db.commit()
+
+    # 대화 전체를 한 번에 분석 (질문-답변 연결을 살리기 위해)
+    morph_saved = _run_analysis(session_id, sess, db)
     db.refresh(sess)
 
     return RecordingUploadResponse(
@@ -237,8 +257,7 @@ def append_transcript_line(
 
     promptmaker.save_stt_result(session_id, cleaned, db, qa_type=qa_type)
     if qa_type == "A":
-        for analyzed in morph_service.analyze(cleaned):
-            promptmaker.save_morphs_to_db(session_id, analyzed, db)
+        _run_analysis(session_id, sess, db)
 
     sess.transcript = "\n".join(q.text for q in sess.qa_logs)
     if sess.status == SessionStatus.RECORDING:

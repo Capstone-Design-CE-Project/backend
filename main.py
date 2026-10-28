@@ -34,6 +34,12 @@ async def lifespan(_: FastAPI):
         print("[INIT] CLOVA 키 없음 - STT는 목 데이터로 동작합니다.")
     if not settings.openai_enabled:
         print("[INIT] OpenAI 키 없음 - 요약/이미지는 대체 로직으로 동작합니다.")
+    if settings.AUTO_ISSUE_CLIENT_PIN:
+        print(
+            "[INIT] ⚠ AUTO_ISSUE_CLIENT_PIN=True - PIN 없이 등록된 내담자에게 "
+            f"기본 PIN('{settings.DEFAULT_CLIENT_PIN}')이 자동 발급됩니다. "
+            "실제 환자 데이터를 다루기 전에 .env에서 False로 변경하세요."
+        )
     yield
 
 

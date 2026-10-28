@@ -46,6 +46,14 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "./uploads"
     MEDIA_URL_PREFIX: str = "/media"
 
+    # ── 데모 편의 (운영 전 반드시 끌 것) ──────────────────────
+    # 내담자 등록 시 PIN을 주지 않으면 기본 PIN을 자동 발급한다.
+    # 프론트에 PIN 입력 UI가 아직 없어 어르신 로그인이 막히는 것을 피하기 위한 장치다.
+    # 누구나 기본 PIN으로 로그인할 수 있게 되므로,
+    # 실제 환자 데이터를 다루기 전에 반드시 False 로 바꿀 것.
+    AUTO_ISSUE_CLIENT_PIN: bool = True
+    DEFAULT_CLIENT_PIN: str = "123456"   # 어르신 앱이 6자리만 받는다
+
     # ── 시간대 ────────────────────────────────────────────────
     # DB에 저장하는 모든 시각의 기준 시간대. 서버 OS/DB 시간대와 무관하게 적용된다.
     APP_TIMEZONE: str = "Asia/Seoul"

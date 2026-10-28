@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session as DBSession
 
+from core.config import settings
 from core.deps import get_current_counselor, get_owned_client
 from core.phone import normalize_phone
 from core.security import generate_code, hash_password
@@ -65,10 +66,21 @@ def create_client(
     db: DBSession = Depends(get_db),
 ):
     """new-client-form 화면의 '저장하기'."""
+    pin = payload.pin
+
+    # 프론트가 PIN을 보내지 않는 동안 어르신 로그인이 막히지 않도록
+    # 기본 PIN을 자동 발급한다 (AUTO_ISSUE_CLIENT_PIN=False 로 끌 수 있음).
+    if not pin and settings.AUTO_ISSUE_CLIENT_PIN:
+        pin = settings.DEFAULT_CLIENT_PIN
+        print(
+            f"[CLIENT] PIN 미지정 - 기본 PIN 자동 발급 (name={payload.name}, "
+            f"phone={payload.phone}). 운영 전 AUTO_ISSUE_CLIENT_PIN=False 로 변경할 것."
+        )
+
     if payload.login_id:
         if db.query(User).filter(User.login_id == payload.login_id).first():
             raise HTTPException(status_code=409, detail="이미 사용 중인 아이디입니다.")
-        if not payload.pin:
+        if not pin:
             raise HTTPException(status_code=400, detail="앱 로그인 ID를 지정하면 PIN도 필요합니다.")
 
     client = User(
@@ -82,7 +94,7 @@ def create_client(
         cognitive_stage=payload.cognitive_stage,
         member_code=_unique_member_code(db),
         login_id=payload.login_id,
-        pin_hash=hash_password(payload.pin) if payload.pin else None,
+        pin_hash=hash_password(pin) if pin else None,
         profile_image_url=payload.profile_image_url,
     )
     db.add(client)

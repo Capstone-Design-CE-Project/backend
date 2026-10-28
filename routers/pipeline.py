@@ -12,6 +12,7 @@
 이 라우터는 토큰 없이 접근 가능하므로 운영 환경에서는
 LEGACY_PIPELINE_ENABLED=False 로 끄고 마이그레이션할 것.
 """
+import json
 from typing import List
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -19,13 +20,35 @@ from sqlalchemy.orm import Session as DBSession
 
 from core.timeutil import now_local
 from database import get_db
-from models import Album, CounselSession, SessionStatus, User
+from models import Album, CounselSession, QaLog, SessionStatus, User
 import promptmaker
 from schemas import AlbumOut
 from services import image_service, morph_service, serializers, stt_service
 from services import summary_service
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline (legacy)"])
+
+def _run_analysis(session_id: int, sess, db) -> int:
+    """세션의 대화 전체를 한 번에 분석해 저장하고 명사 수를 반환.
+
+    새 엔진은 질문과 답변을 이어서 해석하므로 발화를 하나씩 넘기지 않고
+    qa_log 전체를 넘긴다. 분석기가 없으면 조용히 0을 반환한다.
+    """
+    turns = [
+        {"type": row.type, "text": row.text}
+        for row in db.query(QaLog)
+        .filter(QaLog.session_id == session_id)
+        .order_by(QaLog.order_index)
+        .all()
+    ]
+    result = morph_service.analyze_conversation(turns)
+    if not result.get("nouns") and not result.get("relations"):
+        return 0
+
+    sess.analysis_json = json.dumps(result, ensure_ascii=False)
+    db.commit()
+    return promptmaker.save_analysis_to_db(session_id, result, db)
+
 
 
 def _get_session(session_id: int, db: DBSession) -> CounselSession:
@@ -102,15 +125,13 @@ def process_audio(
             session_id, full_text, db, order_index=order_index, qa_type="A"
         )
 
-    morph_saved = 0
     utterances = stt_service.split_speakers(segments).get("client", []) or [full_text]
-    for utterance in utterances:
-        for analyzed in morph_service.analyze(utterance):
-            morph_saved += promptmaker.save_morphs_to_db(session_id, analyzed, db)
 
     sess.transcript = full_text
     sess.status = SessionStatus.TRANSCRIBED
     db.commit()
+
+    morph_saved = _run_analysis(session_id, sess, db)
 
     return {
         "session_id": session_id,

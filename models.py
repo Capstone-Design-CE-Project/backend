@@ -123,6 +123,7 @@ class CounselSession(Base):
     transcript   = Column(Text)              # STT 전문
     summary      = Column(Text)              # AI 요약본(상담사 수정 가능)
     keywords     = Column(Text)              # 핵심 기억 키워드 (콤마 구분)
+    analysis_json = Column(Text)             # 형태소/관계 분석 원본 (nouns/relations)
     reference_code = Column(String(30), unique=True)  # #CC-8821-XP
     started_at   = Column(DateTime)
     ended_at     = Column(DateTime)
@@ -207,6 +208,8 @@ class Verb(Base):
     id      = Column(PK, primary_key=True, autoincrement=True)
     noun_id = Column(FK, ForeignKey("noun.id"), nullable=False)
     value   = Column(String(100), nullable=False)
+    # 1=긍정, 0=부정. "안 먹었다"를 "먹었다"로 그리지 않기 위해 보존한다.
+    polarity_bit = Column(Integer, nullable=False, default=1)
 
     noun = relationship("Noun", back_populates="verbs")
 

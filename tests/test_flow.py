@@ -293,12 +293,20 @@ def test_phone_login_and_timezone(client, auth):
     """프론트(client_login.dart / calendar)가 보내는 실제 형식 검증."""
     from datetime import datetime, timedelta, timezone
 
-    # 상담사가 전화번호만 입력해 등록 (new_client_form.dart 와 동일)
-    res = client.post(
-        "/clients",
-        headers=auth,
-        json={"name": "김순자", "age": 80, "gender": "F", "phone": "010-9876-5432"},
-    )
+    from core.config import settings
+
+    # 자동 발급을 끈 상태에서 전화번호만 입력해 등록
+    original = settings.AUTO_ISSUE_CLIENT_PIN
+    settings.AUTO_ISSUE_CLIENT_PIN = False
+    try:
+        res = client.post(
+            "/clients",
+            headers=auth,
+            json={"name": "김순자", "age": 80, "gender": "F", "phone": "010-9876-5432"},
+        )
+    finally:
+        settings.AUTO_ISSUE_CLIENT_PIN = original
+
     assert res.status_code == 201
     client_id = res.json()["id"]
     assert res.json()["has_pin"] is False
@@ -371,3 +379,49 @@ def test_naive_datetime_still_accepted(client, auth):
     )
     assert res.status_code == 201
     assert res.json()["scheduled_at"].startswith("2030-12-01T09:30")
+
+
+def test_auto_issued_pin_allows_phone_login(client, auth):
+    """프론트가 PIN을 못 보내는 동안의 우회: 기본 PIN 자동 발급.
+
+    new_client_form.dart 는 pin 없이 createClient 를 호출한다.
+    AUTO_ISSUE_CLIENT_PIN=True 이면 기본 PIN이 발급돼 전화번호로 로그인된다.
+    """
+    from core.config import settings
+
+    res = client.post(
+        "/clients",
+        headers=auth,
+        json={"name": "최정자", "age": 83, "gender": "F", "phone": "010-2222-3333"},
+    )
+    assert res.status_code == 201, res.text
+    assert res.json()["has_pin"] is True      # pin 을 안 보냈는데도 발급됨
+
+    res = client.post(
+        "/auth/client/login",
+        json={"login_id": "010-2222-3333", "pin": settings.DEFAULT_CLIENT_PIN},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["role"] == "client"
+
+    # 기본 PIN이 아닌 값은 여전히 거부
+    res = client.post(
+        "/auth/client/login", json={"login_id": "010-2222-3333", "pin": "999999"}
+    )
+    assert res.status_code == 401
+
+
+def test_explicit_pin_overrides_default(client, auth):
+    """명시적으로 보낸 PIN은 그대로 쓰이고 기본 PIN은 통하지 않는다."""
+    res = client.post(
+        "/clients",
+        headers=auth,
+        json={"name": "강복순", "phone": "010-4444-5555", "pin": "778899"},
+    )
+    assert res.status_code == 201
+    assert client.post(
+        "/auth/client/login", json={"login_id": "01044445555", "pin": "778899"}
+    ).status_code == 200
+    assert client.post(
+        "/auth/client/login", json={"login_id": "01044445555", "pin": "1234"}  # 기본 PIN(123456) 아님
+    ).status_code == 401

@@ -4,6 +4,7 @@
 models.py / database.py의 SQLAlchemy 세션을 그대로 쓰도록 통일했다.
 (드라이버가 두 개로 갈려 트랜잭션이 분리되던 문제 해결)
 """
+import json
 from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session as DBSession
@@ -88,71 +89,167 @@ def _next_order_index(session_id: int, db: DBSession) -> int:
     return (last[0] + 1) if last else 1
 
 
-# ── 3. 형태소 분석 결과 → noun / adjective / verb ─────────────
-def save_morphs_to_db(session_id: int, result: Dict, db: DBSession) -> int:
-    """extract_nouns_adjectives_verbs() 결과를 저장하고 명사 수를 반환."""
-    noun_objects = result.get("noun_objects") or []
-    if not noun_objects:
-        print("[DB] 명사 없음 - 형태소 저장 생략")
+# ── 3. 분석 결과 → noun / adjective / verb ────────────────────
+def save_analysis_to_db(session_id: int, result: Dict, db: DBSession) -> int:
+    """counseling_analysis_interface.analyze() 결과를 저장하고 명사 수를 반환.
+
+    결과 구조 (v3.2 엔진)
+        {"nouns":     [{noun, adjectives, positions, moderators, target,
+                        relative_clauses}, ...],
+         "relations": [{subjects, verb, object, direct_objects, ...,
+                        polarity_bit, display}, ...]}
+
+    nouns  → noun 테이블 (+ adjectives/positions/moderators 는 adjective 로)
+    relations → 주어에 해당하는 noun 에 verb 로 연결 (부정은 polarity_bit=0)
+    """
+    nouns = result.get("nouns") or []
+    if not nouns:
+        print("[DB] 명사 없음 - 분석 결과 저장 생략")
         return 0
 
     relations = result.get("relations") or []
 
-    for noun_obj in noun_objects:
-        # relations에서 이 명사가 목적어면 주어를 target_noun으로 기록
-        target = None
-        for rel in relations:
-            obj = getattr(rel, "obj", None)
-            subject = getattr(rel, "subject", None)
-            if obj is not None and subject is not None and obj.noun == noun_obj.noun:
-                target = subject.noun
-                break
+    # 같은 상담을 다시 분석하면 중복이 쌓이므로 기존 분석 결과를 비운다.
+    _clear_morphs(session_id, db)
 
-        noun_row = Noun(
+    noun_rows: Dict[str, Noun] = {}
+    for item in nouns:
+        value = str(item.get("noun", "")).strip()
+        if not value:
+            continue
+
+        row = Noun(
             session_id=session_id,
-            value=noun_obj.noun,
-            target_noun=target,
+            value=value[:100],
+            target_noun=(str(item["target"])[:100] if item.get("target") else None),
             is_base_noun=False,
         )
-        db.add(noun_row)
-        db.flush()               # noun_row.id 확보
+        db.add(row)
+        db.flush()                       # row.id 확보
+        noun_rows[value] = row
 
-        # 형용사 / 위치 / 수식 명사를 모두 adjective로 저장
-        modifiers = []
-        modifiers += list(getattr(noun_obj, "adjectives", []) or [])
-        modifiers += list(getattr(noun_obj, "position", []) or [])
-        modifiers += list(getattr(noun_obj, "moderators", []) or [])
+        for modifier in _collect_modifiers(item):
+            db.add(Adjective(noun_id=row.id, value=modifier[:100]))
 
-        for mod in modifiers:
-            value = _stringify(mod)
-            if value:
-                db.add(Adjective(noun_id=noun_row.id, value=value[:100]))
-
-        # 동사는 관계에서 추출
-        for rel in relations:
-            subject = getattr(rel, "subject", None)
-            verb = getattr(rel, "verb", None)
-            if subject is not None and verb and subject.noun == noun_obj.noun:
-                db.add(Verb(noun_id=noun_row.id, value=str(verb)[:100]))
+    # 관계의 동사를 주어 명사에 붙인다
+    for relation in relations:
+        verb = str(relation.get("verb", "")).strip()
+        if not verb:
+            continue
+        polarity = int(relation.get("polarity_bit", 1))
+        for subject in relation.get("subjects") or []:
+            row = noun_rows.get(str(subject).strip())
+            if row is not None:
+                db.add(Verb(noun_id=row.id, value=verb[:100], polarity_bit=polarity))
 
     db.commit()
-    print(f"[DB] 형태소 분석 결과 저장 완료: {len(noun_objects)}개 명사")
-    return len(noun_objects)
+    print(f"[DB] 분석 결과 저장 완료: 명사 {len(noun_rows)}개, 관계 {len(relations)}개")
+    return len(noun_rows)
 
 
-def _stringify(value) -> str:
-    """position은 (위치, 대상) 튜플로 들어올 수 있어 문자열로 평탄화."""
-    if isinstance(value, (tuple, list)):
-        return " ".join(str(v).strip() for v in value if str(v).strip())
-    return str(value).strip() if value is not None else ""
+def _collect_modifiers(noun_item: Dict) -> List[str]:
+    """형용사 / 위치 / 수식 명사를 adjective 로 넣을 문자열로 평탄화."""
+    out: List[str] = []
+    out += [str(v).strip() for v in (noun_item.get("adjectives") or [])]
+    out += [str(v).strip() for v in (noun_item.get("moderators") or [])]
+
+    for position in noun_item.get("positions") or []:
+        if isinstance(position, dict):
+            target = str(position.get("target") or "").strip()
+            location = str(position.get("location") or "").strip()
+            merged = " ".join(part for part in (target, location) if part)
+        else:
+            merged = str(position).strip()
+        if merged:
+            out.append(merged)
+
+    return [v for v in out if v]
 
 
-# ── 4. DB → 한국어 장면 설명 ──────────────────────────────────
-def make_scene_description(session_id: int, db: DBSession) -> str:
-    """noun/adjective를 조합해 장면 설명 문자열 생성.
+def _clear_morphs(session_id: int, db: DBSession) -> None:
+    """해당 세션의 noun/adjective/verb 만 비운다 (qa_log·album 은 유지)."""
+    noun_ids = [
+        n.id for n in db.query(Noun.id).filter(Noun.session_id == session_id).all()
+    ]
+    if noun_ids:
+        db.query(Adjective).filter(Adjective.noun_id.in_(noun_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Verb).filter(Verb.noun_id.in_(noun_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Noun).filter(Noun.session_id == session_id).delete(
+            synchronize_session=False
+        )
+        db.flush()
 
-    예) "남색 등대, 흰색 배 (등대 근처에), 바닷가"
+
+def save_morphs_to_db(session_id: int, result: Dict, db: DBSession) -> int:
+    """하위 호환 별칭. 신규 코드는 save_analysis_to_db 를 쓴다."""
+    return save_analysis_to_db(session_id, result, db)
+
+
+# ── 4. 분석 결과 → 한국어 장면 설명 ──────────────────────────
+def make_scene_from_analysis(result: Dict) -> str:
+    """analyze() 결과로 장면 설명을 만든다 (관계·부정 반영).
+
+    예) "주황색 감이 열린 감나무, 마당 옆 우물, 어머니가 감을 깎는 모습"
     """
+    nouns = result.get("nouns") or []
+    relations = result.get("relations") or []
+    if not nouns and not relations:
+        return ""
+
+    parts: List[str] = []
+    seen = set()
+
+    def add(text: str) -> None:
+        text = text.strip()
+        if text and text not in seen:
+            seen.add(text)
+            parts.append(text)
+
+    for item in nouns:
+        value = str(item.get("noun", "")).strip()
+        if not value:
+            continue
+        modifiers = _collect_modifiers(item)
+        add((" ".join(modifiers) + " " + value).strip() if modifiers else value)
+
+    for relation in relations:
+        verb = str(relation.get("verb", "")).strip()
+        if not verb:
+            continue
+        subjects = [str(v) for v in (relation.get("subjects") or []) if v]
+        obj = relation.get("object")
+        phrase = " ".join(filter(None, [
+            ", ".join(subjects) if subjects else "",
+            f"{obj}을(를)" if obj else "",
+            verb,
+        ]))
+        # polarity_bit=0 이면 부정. 반대 장면을 그리지 않도록 표시한다.
+        if int(relation.get("polarity_bit", 1)) == 0:
+            phrase = f"{phrase} (하지 않음)"
+        add(phrase)
+
+    scene = ", ".join(parts)
+    print(f"[PROMPT] 장면 설명: {scene[:120]}")
+    return scene
+
+
+def make_scene_description(session_id: int, db: DBSession) -> str:
+    """세션의 분석 결과로 장면 설명을 만든다.
+
+    session.analysis_json 이 있으면 그것을(관계 포함) 쓰고,
+    없으면 noun/adjective 테이블에서 조합한다(구버전 데이터 대응).
+    """
+    sess = db.query(CounselSession).filter(CounselSession.id == session_id).first()
+    if sess is not None and sess.analysis_json:
+        try:
+            return make_scene_from_analysis(json.loads(sess.analysis_json))
+        except (ValueError, TypeError) as exc:
+            print(f"[PROMPT] analysis_json 파싱 실패, 테이블로 대체: {exc}")
+
     nouns = (
         db.query(Noun)
         .filter(Noun.session_id == session_id)
@@ -170,13 +267,21 @@ def make_scene_description(session_id: int, db: DBSession) -> str:
         line = (" ".join(adjectives) + " " if adjectives else "") + noun.value
         if noun.target_noun:
             line += f" ({noun.target_noun} 근처에)"
+
+        verbs = [v for v in noun.verbs if v.value]
+        if verbs:
+            rendered = [
+                v.value if v.polarity_bit else f"{v.value} (하지 않음)" for v in verbs
+            ]
+            line += " - " + ", ".join(rendered)
+
         if line in seen:
             continue
         seen.add(line)
         parts.append(line)
 
     scene = ", ".join(parts)
-    print(f"[PROMPT] 장면 설명: {scene}")
+    print(f"[PROMPT] 장면 설명: {scene[:120]}")
     return scene
 
 

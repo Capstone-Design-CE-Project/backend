@@ -11,7 +11,9 @@ bcrypt>=4.1
 requests>=2.31
 openai>=1.14
 
-# 형태소 분석 (promptmaker_first.py) - JDK 설치 필요
+# 형태소/관계 분석 (prompt_maker_succeed_3_span_experiment.py)
+# JDK 설치 필요: Ubuntu `apt install default-jdk`, Mac `brew install openjdk`
+# JDK 가 없으면 .env 에 ENABLE_MORPH_ANALYSIS=False 를 넣어 끌 수 있다.
 konlpy>=0.6.0
 
 # 개발/테스트용
